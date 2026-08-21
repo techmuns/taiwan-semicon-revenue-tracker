@@ -54,53 +54,70 @@ running service states it — `/api/meta` reports `access.mode`, and a 401 carri
 | Mode | Set | Behaviour |
 |---|---|---|
 | `cf-access` | `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` | Verifies `Cf-Access-Jwt-Assertion` against the team JWKS. |
-| `secret` | `DASHBOARD_KEY` | Shared key, exchanged at `POST /auth` for an HttpOnly cookie. **Current state.** |
-| `open` | nothing | No access control. |
+| `secret` | `DASHBOARD_KEY` | Shared key, exchanged at `POST /auth` for an HttpOnly cookie. |
+| `open` | nothing | No access control. **Current state.** |
 
-Current mode is **`secret`** — set 2026-08-21 via `wrangler secret put
-DASHBOARD_KEY`. Check it without a credential:
+Current mode is **`open`** — anyone with the URL reads everything, including the
+bucket and tier framing. This is a decision, not an oversight: the key was set on
+2026-08-21 and **deliberately removed on 2026-08-22** at the owner's instruction,
+because the tracker is to work without a credential. Check the posture at any time,
+without one:
 
 ```bash
-curl -si https://taiwan-semicon-revenue.tech-441.workers.dev/api/meta | grep -i x-access-mode
+curl -s https://taiwan-semicon-revenue.tech-441.workers.dev/api/meta | grep -o '"mode":"[a-z-]*"'
 ```
 
-### What the reader sees
+The dashboard states it too: the header shows an amber **open access** chip whenever
+`/api/meta` reports `public: true`, which exists so that "we left it public and
+forgot" cannot be the silent state.
 
-Any `/api/*` 401 puts the SPA on its unlock screen
-(`web/src/components/KeyGate.tsx`) instead of six identical "unauthorized" cards.
-The key is POSTed once — never a query string, which would land in browser history,
-in any intermediary's logs, and in Cloudflare's own request logs — and exchanged for
-a 30-day HttpOnly `twrev_session` cookie. Nothing is written to `localStorage`, so
-the key exists in the page for exactly as long as the form does.
+### Turning a key back on
 
-`Lock` in the header (shown only in `secret` mode) hits `/logout`, clears the
-cookie, and returns to the unlock screen. That is the only way to end a session on
-a shared machine before the 30 days elapse.
-
-A 401 is `Cache-Control: no-store`, so a rejected request never sticks in a cache.
-Successful `/api/*` responses are `max-age=300` — which is why turning the key on
-does not lock a tab out immediately: it keeps serving cached 200s until they expire,
-and only a route it has not fetched before 401s first. That is exactly how this was
-noticed, on `/api/company/5347`.
-
-### Rotating the key
+One command, effective on the next request, no deploy and no code change:
 
 ```bash
 npx wrangler secret put DASHBOARD_KEY --cwd worker
 ```
 
-Effective on the next request. Every existing cookie holds the old value, so every
-open session is locked out at once and re-prompted — rotation is also revocation.
-A secret change deploys a new Worker version by itself; it does **not** need a
-`wrangler deploy`, and it does not touch the assets.
+Everything on the reading end is already built and stays in the bundle:
+
+- Any `/api/*` 401 puts the SPA on its unlock screen
+  (`web/src/components/KeyGate.tsx`) rather than six identical "unauthorized" cards.
+  The key is POSTed once — never a query string, which would land in browser
+  history, in any intermediary's logs, and in Cloudflare's own request logs — and
+  exchanged for a 30-day HttpOnly `twrev_session` cookie. Nothing is written to
+  `localStorage`.
+- `Lock` in the header appears only in `secret` mode. It hits `/logout` and clears
+  the cookie — the only way to end a session on a shared machine before the 30 days
+  elapse.
+- Re-running `secret put` with a new value locks out every existing session at once,
+  because each cookie holds the old value. Rotation is also revocation.
+
+To go back to open, delete it:
+
+```bash
+npx wrangler secret delete DASHBOARD_KEY --cwd worker
+```
+
+A secret change deploys a new Worker version by itself. It does **not** need a
+`wrangler deploy` and it does not touch the assets — which is worth knowing, because
+a `Source: Secret Change` entry in `wrangler deployments list` is how a posture flip
+shows up in the deploy history.
+
+**The five-minute lag.** Successful `/api/*` responses are `max-age=300`, so turning
+a key on does not lock an open tab out immediately: it keeps serving cached 200s
+until they expire, and the first thing to 401 is a route that tab had never fetched.
+A 401 itself is `no-store`, so nothing caches the rejection. This is exactly how the
+2026-08-21 flip surfaced — as a lone `/api/company/5347 · HTTP 401` on a dashboard
+whose other five tabs still looked fine.
 
 ### Why not Cloudflare Access
 
-It is the stronger option and it **cannot protect a `*.workers.dev` hostname** — it
-needs a domain onboarded to the account, a Zero Trust application over the route,
-then both `CF_ACCESS_*` values as secrets. No domain is onboarded, so `secret` is
-the available posture. The `cf-access` path is written and tested; it needs only the
-two secrets to take over, with no code change.
+It is the strongest of the three and it **cannot protect a `*.workers.dev`
+hostname** — it needs a domain onboarded to the account, a Zero Trust application
+over the route, then both `CF_ACCESS_*` values as secrets. No domain is onboarded,
+so it is unavailable regardless of preference. The `cf-access` path is written and
+tested; it needs only the two secrets to take over, with no code change.
 
 `/api/health` stays open in every mode, deliberately: a monitor has to be able to
 see "up" without a credential, and it carries no revenue figures. So does `/`

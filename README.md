@@ -152,11 +152,17 @@ silent bug here.
 The dashboard, API, ingest, and quality checks are live and verified against the
 deployed Worker.
 
-Access is **shared-key**: `DASHBOARD_KEY` is set, so every route except
-`/api/health` needs a credential, and the dashboard asks for it once and exchanges
-it for a 30-day HttpOnly cookie. Cloudflare Access is the stronger posture and is
-already implemented, but it cannot protect a `*.workers.dev` hostname — it needs a
-domain on the account. See [Access](docs/RUNBOOK.md#access).
+Access is **open by decision**: no credential is required, and the header carries an
+amber *open access* chip so that is never the silent state. Two stronger postures
+are implemented and dormant — a shared key with an unlock screen, and Cloudflare
+Access — each selected by setting secrets, not by editing code. Locking it down is
+one command:
+
+```bash
+npx wrangler secret put DASHBOARD_KEY --cwd worker
+```
+
+Effective on the next request, no deploy. See [Access](docs/RUNBOOK.md#access).
 
 One item is open and it needs an account change rather than code: the monthly cron
 cannot register because the Cloudflare account has already spent its 5 free cron
