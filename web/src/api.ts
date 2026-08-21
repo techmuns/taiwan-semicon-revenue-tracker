@@ -8,6 +8,12 @@
  * Errors are thrown as `ApiError` with the status attached. Widgets render an
  * error state from it; nothing swallows a failure into an empty array, because
  * "no data" and "the request failed" must not look the same on screen.
+ *
+ * One status is handled here rather than by the widget that happened to hit it:
+ * 401. When the Worker is in `secret` mode a credential is missing for the whole
+ * dashboard, not for one card, so a 401 is published to a subscriber (App) that
+ * shows the unlock screen. Left to the widgets it would draw six identical
+ * "unauthorized" error cards and no way to fix any of them.
  */
 
 import type {
@@ -62,6 +68,19 @@ export function filterParams(f: FilterState): URLSearchParams {
   return p;
 }
 
+// -------------------------------------------------------------- 401 signal --
+
+const lockListeners = new Set<() => void>();
+
+/**
+ * Subscribe to "the API says we have no credential". Returns an unsubscribe, so
+ * it drops straight into a useEffect.
+ */
+export function onUnauthorized(fn: () => void): () => void {
+  lockListeners.add(fn);
+  return () => lockListeners.delete(fn);
+}
+
 async function get<T>(path: string): Promise<T> {
   let resp: Response;
   try {
@@ -70,6 +89,7 @@ async function get<T>(path: string): Promise<T> {
     // Network-level failure: no status to report.
     throw new ApiError(err instanceof Error ? err.message : "network error", 0, path);
   }
+  if (resp.status === 401) for (const fn of lockListeners) fn();
   if (!resp.ok) {
     let detail = `HTTP ${resp.status}`;
     try {
@@ -110,4 +130,27 @@ export const api = {
 
   /** Not fetched - handed to the browser as a download. */
   exportUrl: (f: FilterState) => `/api/export.csv?${filterParams(f)}`,
+
+  /**
+   * Exchange the shared key for the session cookie. POST, never a query string:
+   * a key in a URL lands in browser history, in any proxy's logs, and in
+   * Cloudflare's own request logs. The cookie the Worker sets is HttpOnly, so
+   * this is the last time any JavaScript here sees the key - it is not stored.
+   *
+   * Resolves true on acceptance, false on rejection. A wrong key is an expected
+   * outcome of a login form, not an exception.
+   */
+  auth: async (key: string): Promise<boolean> => {
+    const resp = await fetch("/auth", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    return resp.ok;
+  },
+
+  /** Clear the session cookie. The only write this dashboard performs. */
+  logout: async (): Promise<void> => {
+    await fetch("/logout", { method: "POST" });
+  },
 };

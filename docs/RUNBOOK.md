@@ -10,42 +10,9 @@ Live: <https://taiwan-semicon-revenue.tech-441.workers.dev>
 
 ## Open items
 
-Two things are not closed, and neither can be closed from a terminal.
+One thing is not closed, and it cannot be closed from a terminal.
 
-### 1. The URL has no access control
-
-`/api/health` reports the posture, and the dashboard prints it in the header:
-
-```bash
-curl -s https://taiwan-semicon-revenue.tech-441.workers.dev/api/meta | grep -o '"mode":"[a-z-]*"'
-```
-
-Current mode is **`open`** — anyone with the URL reads everything, including the
-bucket and tier framing, which is the proprietary part of this tracker. The
-Worker supports three postures and picks whichever is configured, most specific
-first (`worker/src/access.ts`):
-
-| Mode | Set | Behaviour |
-|---|---|---|
-| `cf-access` | `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` | Verifies `Cf-Access-Jwt-Assertion` against the team JWKS. |
-| `secret` | `DASHBOARD_KEY` | Shared key; `POST /auth {"key":"…"}` exchanges it for a session cookie, or send `X-Dashboard-Key`. |
-| `open` | nothing | No access control. **Current state.** |
-
-To take the shared-key route — one command, effective on the next request:
-
-```bash
-npx wrangler secret put DASHBOARD_KEY --cwd worker
-```
-
-Cloudflare Access is the stronger option but **cannot protect a
-`*.workers.dev` hostname**. It needs a domain onboarded to the account, a Zero
-Trust application over the route, and then both `CF_ACCESS_*` values set as
-secrets. Until a domain exists, `secret` is the available posture.
-
-`/api/health` stays open in every mode, deliberately: a monitor has to be able
-to see "up" without a credential, and it carries no revenue figures.
-
-### 2. There is no monthly auto-refresh
+### There is no monthly auto-refresh
 
 `worker/wrangler.toml` declares the schedule and the code is written and
 deployed, but **the cron trigger will not register**:
@@ -75,6 +42,70 @@ Every write is gated on `row_hash`, so running it repeatedly is harmless and
 running it early is a clean no-op — the cron derives the month from the payload's
 `資料年月`, never from the clock, so a feed still showing the prior month logs
 and exits.
+
+---
+
+## Access
+
+The posture is **derived from which secrets are set**, never hardcoded, and the
+running service states it — `/api/meta` reports `access.mode`, and a 401 carries an
+`X-Access-Mode` header. Most specific wins (`worker/src/access.ts`):
+
+| Mode | Set | Behaviour |
+|---|---|---|
+| `cf-access` | `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` | Verifies `Cf-Access-Jwt-Assertion` against the team JWKS. |
+| `secret` | `DASHBOARD_KEY` | Shared key, exchanged at `POST /auth` for an HttpOnly cookie. **Current state.** |
+| `open` | nothing | No access control. |
+
+Current mode is **`secret`** — set 2026-08-21 via `wrangler secret put
+DASHBOARD_KEY`. Check it without a credential:
+
+```bash
+curl -si https://taiwan-semicon-revenue.tech-441.workers.dev/api/meta | grep -i x-access-mode
+```
+
+### What the reader sees
+
+Any `/api/*` 401 puts the SPA on its unlock screen
+(`web/src/components/KeyGate.tsx`) instead of six identical "unauthorized" cards.
+The key is POSTed once — never a query string, which would land in browser history,
+in any intermediary's logs, and in Cloudflare's own request logs — and exchanged for
+a 30-day HttpOnly `twrev_session` cookie. Nothing is written to `localStorage`, so
+the key exists in the page for exactly as long as the form does.
+
+`Lock` in the header (shown only in `secret` mode) hits `/logout`, clears the
+cookie, and returns to the unlock screen. That is the only way to end a session on
+a shared machine before the 30 days elapse.
+
+A 401 is `Cache-Control: no-store`, so a rejected request never sticks in a cache.
+Successful `/api/*` responses are `max-age=300` — which is why turning the key on
+does not lock a tab out immediately: it keeps serving cached 200s until they expire,
+and only a route it has not fetched before 401s first. That is exactly how this was
+noticed, on `/api/company/5347`.
+
+### Rotating the key
+
+```bash
+npx wrangler secret put DASHBOARD_KEY --cwd worker
+```
+
+Effective on the next request. Every existing cookie holds the old value, so every
+open session is locked out at once and re-prompted — rotation is also revocation.
+A secret change deploys a new Worker version by itself; it does **not** need a
+`wrangler deploy`, and it does not touch the assets.
+
+### Why not Cloudflare Access
+
+It is the stronger option and it **cannot protect a `*.workers.dev` hostname** — it
+needs a domain onboarded to the account, a Zero Trust application over the route,
+then both `CF_ACCESS_*` values as secrets. No domain is onboarded, so `secret` is
+the available posture. The `cf-access` path is written and tested; it needs only the
+two secrets to take over, with no code change.
+
+`/api/health` stays open in every mode, deliberately: a monitor has to be able to
+see "up" without a credential, and it carries no revenue figures. So does `/`
+itself — the asset server answers it before the Worker runs, and the shell holds no
+figures.
 
 ---
 

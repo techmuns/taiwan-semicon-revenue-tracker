@@ -11,7 +11,9 @@
  *
  * The access posture is shown here when the API reports the dashboard is open,
  * because "we left it public and forgot" is a state that has to be visible
- * somewhere the reader cannot miss.
+ * somewhere the reader cannot miss. In shared-key mode the posture is safe, so it
+ * gets no chip - just the Lock action, which is the only way to end a session on a
+ * shared machine once the cookie is set for thirty days.
  */
 
 import { Segmented, TickerPill } from "./controls";
@@ -36,6 +38,7 @@ export function Header({
   ticker,
   onClearTicker,
   exportHref,
+  onLock,
   now,
 }: {
   tab: Tab;
@@ -44,6 +47,7 @@ export function Header({
   ticker: string | null;
   onClearTicker: () => void;
   exportHref: string;
+  onLock: () => void;
   now: number;
 }) {
   const company = ticker
@@ -158,6 +162,27 @@ export function Header({
         >
           Export CSV
         </a>
+        {meta?.access?.mode === "secret" && (
+          <button
+            type="button"
+            onClick={onLock}
+            title="Clear this browser's session cookie and ask for the key again"
+            style={{
+              height: "var(--control-h)",
+              padding: "0 9px",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "var(--text-muted)",
+              background: "var(--card-bg)",
+              border: "1px solid var(--border-solid)",
+              borderRadius: "var(--radius-control)",
+              cursor: "pointer",
+              transition: "var(--ease)",
+            }}
+          >
+            Lock
+          </button>
+        )}
       </div>
     </header>
   );

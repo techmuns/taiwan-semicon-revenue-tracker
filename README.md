@@ -150,7 +150,15 @@ silent bug here.
 ## Status
 
 The dashboard, API, ingest, and quality checks are live and verified against the
-deployed Worker. Two items are open and both need a decision rather than code —
-the API is currently **unauthenticated**, and the monthly cron cannot register
-because the Cloudflare account has already spent its 5 free cron triggers. Both
-are written up in [docs/RUNBOOK.md](docs/RUNBOOK.md#open-items).
+deployed Worker.
+
+Access is **shared-key**: `DASHBOARD_KEY` is set, so every route except
+`/api/health` needs a credential, and the dashboard asks for it once and exchanges
+it for a 30-day HttpOnly cookie. Cloudflare Access is the stronger posture and is
+already implemented, but it cannot protect a `*.workers.dev` hostname — it needs a
+domain on the account. See [Access](docs/RUNBOOK.md#access).
+
+One item is open and it needs an account change rather than code: the monthly cron
+cannot register because the Cloudflare account has already spent its 5 free cron
+triggers, so the refresh is run by hand once a month. Written up in
+[docs/RUNBOOK.md](docs/RUNBOOK.md#open-items).

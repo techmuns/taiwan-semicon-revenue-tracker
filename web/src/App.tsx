@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
-import { api } from "./api";
+import { api, onUnauthorized } from "./api";
 import type { FilterState } from "./api";
 import { readView, windowMonths, writeView } from "./urlState";
 import type { ViewState } from "./urlState";
@@ -23,6 +23,7 @@ import { revenue } from "./format";
 import { Header } from "./components/Header";
 import type { Tab } from "./components/Header";
 import { FilterBar } from "./components/FilterBar";
+import { KeyGate } from "./components/KeyGate";
 import { WidgetCard } from "./components/WidgetCard";
 import { AsyncBody, EmptyState, ErrorState, Shimmer, ShimmerBlock } from "./components/states";
 import { Segmented, ViewToggle } from "./components/controls";
@@ -64,7 +65,12 @@ function useNow(intervalMs = 60_000): number {
 
 export default function App() {
   const [view, setView] = useState<ViewState>(readView);
+  const [locked, setLocked] = useState(false);
   const now = useNow();
+
+  // A 401 from any query means the whole dashboard has no credential, not that one
+  // widget failed. Subscribed once here; see api.ts for why it is not per-widget.
+  useEffect(() => onUnauthorized(() => setLocked(true)), []);
 
   useEffect(() => writeView(view), [view]);
   useEffect(() => {
@@ -110,6 +116,16 @@ export default function App() {
 
   const showFilters = view.tab !== "quality" && view.tab !== "company";
 
+  // Placed after every hook above on purpose - an early return before them would
+  // break the rules of hooks. The queries they hold are harmless while locked: each
+  // 401s once, which is what set this flag in the first place.
+  if (locked) {
+    // A full reload, because the session cookie is HttpOnly and therefore invisible
+    // to this code. It also drops the view state back to the URL, which is where it
+    // already lives, so the reader lands on the same tab they were locked out of.
+    return <KeyGate onUnlocked={() => location.reload()} />;
+  }
+
   return (
     <div
       style={{
@@ -127,6 +143,9 @@ export default function App() {
         ticker={view.ticker}
         onClearTicker={() => setView((v) => ({ ...v, ticker: null }))}
         exportHref={api.exportUrl(view.filters)}
+        onLock={() => {
+          void api.logout().then(() => setLocked(true));
+        }}
         now={now}
       />
 
