@@ -12,6 +12,16 @@ __pycache__/
 venv/
 .pytest_cache/
 
+# Build output: `npm run build` in web/ writes straight into worker/public, and
+# `wrangler deploy` uploads it from there. It is generated, so it is not source.
+#
+# Consequence for CI: a Cloudflare Workers Build must build the frontend itself,
+# or it will deploy a Worker with an empty assets directory and the dashboard
+# will 404. Settings that work from the repo root:
+#     build:  npm --prefix web ci && npm --prefix web run build
+#     deploy: npx wrangler deploy -c worker/wrangler.toml
+worker/public/
+
 # Local data: fetched bytes and generated SQL are reproducible, not source
 ingest/cache/
 ingest/out/

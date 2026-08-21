@@ -17,6 +17,7 @@
  */
 
 import { accessPosture, type AccessEnv } from "./access";
+import { addMonths } from "./normalize";
 
 export interface Env extends AccessEnv {
   DB: D1Database;
@@ -274,7 +275,18 @@ async function heatmap(env: Env, url: URL) {
     return { group, metric, agg: "none", filters: f, cells: rows.results };
   }
 
-  const { sql, binds } = whereFor(f, { prefix: "b", revenueCol: "revenue_month" });
+  // Aggregate over ONE MONTH MORE than the window shows, then drop it at the end.
+  //
+  // Acceleration at the bucket level is a difference of two consecutive monthly
+  // aggregates, so the first displayed month needs the month before it to exist
+  // inside the CTE. Filtering to `from` first is what made January null for every
+  // stage while the per-ticker view - whose LAG runs over the whole series - had a
+  // value for it. That is exactly what the Dec 2025 shoulder month was fetched
+  // for; the aggregate has to reach for it too.
+  const { sql, binds } = whereFor(
+    { ...f, from: addMonths(f.from, -1) },
+    { prefix: "b", revenueCol: "revenue_month" },
+  );
   // Aggregate per bucket-month from the LEVELS, then difference consecutive
   // months for acceleration - the same recompute-from-integers rule the
   // per-ticker view follows, applied one level up.
@@ -345,9 +357,14 @@ async function heatmap(env: Env, url: URL) {
             CASE WHEN prev_idx = month_idx - 1
                  THEN ROUND(ROUND(yoy_equal, 2) - prev_yoy_equal, 2) END
               AS acceleration_equal
-       FROM calc ORDER BY bucket, month`,
+       FROM calc
+      WHERE month >= ?
+      ORDER BY bucket, month`,
   )
-    .bind(...binds)
+    // The lookback month's own row is discarded here, after it has served as the
+    // LAG for the first displayed month. Bound last because it is the last
+    // placeholder in the statement text.
+    .bind(...binds, f.from)
     .all();
 
   // Map the requested metric onto the column the aggregation produced, so the

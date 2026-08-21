@@ -1,0 +1,197 @@
+/**
+ * Design tokens.
+ *
+ * Two sources, kept in separate blocks on purpose:
+ *
+ *  - UI CHROME follows the house dashboard standard: indigo primary plus
+ *    grayscale, 48px header, 16px card radius, the exact surface values below.
+ *  - DATA MARKS follow the data-viz palette, which is a different job. Chart
+ *    color encodes magnitude and polarity; chrome color encodes interaction
+ *    state. Mixing them is how a dashboard ends up with a bright category hue
+ *    on a button and an indigo bar in a chart.
+ *
+ * Text never wears a series color. Values, labels, and legends stay in the ink
+ * tokens; a colored swatch beside them carries the identity.
+ */
+
+:root {
+  /* ------------------------------------------------------------ chrome -- */
+  --primary: #4f46e5;
+  --primary-light: #eef2ff;
+  --primary-border: #e0e7ff;
+  --primary-text: #4338ca;
+
+  --page-bg: linear-gradient(to bottom, rgba(249, 250, 251, 0.8), #ffffff);
+  --card-bg: rgba(255, 255, 255, 0.9);
+  --card-header-bg: rgba(255, 255, 255, 0.95);
+  --card-body-bg: rgba(249, 250, 251, 0.5);
+  --header-bg: rgba(255, 255, 255, 0.95);
+  --border: rgba(229, 231, 235, 0.8);
+  --border-solid: #e5e7eb;
+  --border-hover: rgba(79, 70, 229, 0.2);
+
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-muted: #6b7280;
+  --text-hint: #9ca3af;
+
+  --error-red: #ef4444;
+  --error-bg: #fef2f2;
+
+  --radius-card: 16px;
+  --header-h: 48px;
+  --grid-gap: 20px;
+  --ease: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* -------------------------------------------------------- data marks -- */
+  /* The surface charts actually render on: the card body, not the page. */
+  --chart-surface: #f8f9fa;
+  --grid-line: #e1e0d9;
+  --axis-line: #c3c2b7;
+  --ink-muted: #898781;
+
+  /* Sequential blue - continuous magnitude (revenue). Light = near zero. */
+  --seq-100: #cde2fb;
+  --seq-250: #86b6ef;
+  --seq-400: #3987e5;
+  --seq-550: #1c5cab;
+  --seq-700: #0d366b;
+
+  /*
+   * Diverging: blue <-> red with a NEUTRAL GRAY midpoint (never a hue at the
+   * middle). Sign mapping is deliberate and locally conventional: in Taiwan and
+   * across Greater China, RED is the up/gain color and green/blue the down
+   * color - the inverse of US convention. This tracker's readers are looking at
+   * Taiwanese filings, so red = accelerating.
+   *
+   * Because that convention is not universal, color never carries the sign
+   * alone: every cell prints its signed value, and the legend states the
+   * direction in words.
+   *
+   * The blue arm is the documented sequential blue at steps 150/400/600. The red
+   * arm is NOT hand-picked: each step was computed in OKLCH to match its blue
+   * counterpart's lightness and chroma exactly, at the hue of the documented
+   * categorical red. Arms that are not lightness-balanced make one sign look
+   * stronger than the other at equal magnitude, which is a lie the reader has no
+   * way to see. Measured L per arm, midpoint outward: 0.952, 0.858, 0.622, 0.433
+   * (blue) and 0.952, 0.857, 0.623, 0.432 (red) - monotonic and mirrored.
+   */
+  --div-pos-3: #892b2a; /* strongest acceleration */
+  --div-pos-2: #d75853;
+  --div-pos-1: #f4c2be;
+  --div-mid: #f0efec; /* neutral gray - at or near zero, never a hue */
+  --div-neg-1: #b7d3f6;
+  --div-neg-2: #3987e5;
+  --div-neg-3: #184f95; /* strongest deceleration */
+
+  /* Absent, and unmistakably not zero: hatched, not filled. */
+  --cell-missing-bg: #ffffff;
+  --cell-missing-ink: #b8b6b0;
+
+  /* Status - reserved, never reused as a series color. Ships with icon + label. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+/* Tabular figures only where columns must align vertically. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------- shimmer -- */
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.shimmer {
+  background-image: linear-gradient(90deg, #e5e7eb 0%, #f3f4f6 50%, #e5e7eb 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+  }
+}
+
+/* ---------------------------------------------------------- widget card -- */
+
+.widget-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  transition: var(--ease);
+}
+
+.widget-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-hover);
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.08),
+    0 8px 16px rgba(79, 70, 229, 0.06);
+}
+
+/* Cards holding a wide matrix or a long table should not lift under the cursor -
+   the motion fights horizontal scrolling and re-triggers on every cell hover. */
+.widget-card--static:hover {
+  transform: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  border-color: var(--border);
+}
+
+/* --------------------------------------------------------------- focus -- */
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Buttons and inputs inherit the system face rather than the UA default. */
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}

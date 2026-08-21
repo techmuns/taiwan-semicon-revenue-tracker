@@ -19,9 +19,13 @@ database_id = "da985a76-0e1a-4100-abd4-48c21687c290"
 [triggers]
 crons = ["0 1 11,14,18 * *"]
 
-# The [assets] binding is added when web/ is built into public/. Until then the
-# Worker serves a plain landing page and env.ASSETS is undefined - see the
-# ASSETS comment in src/api.ts.
-#   [assets]
-#   directory = "public"
-#   binding = "ASSETS"
+# The dashboard, built by `npm run build` in web/ straight into public/.
+#
+# `not_found_handling` is deliberately left at its default of "none". Setting it
+# to "single-page-application" makes the asset server answer every unmatched
+# path itself, which would swallow /api/* before the Worker ever runs. The SPA
+# fallback is therefore done in src/index.ts, which knows which paths are API
+# routes and which are client-side ones.
+[assets]
+directory = "public"
+binding = "ASSETS"

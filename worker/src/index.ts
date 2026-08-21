@@ -35,6 +35,25 @@ export default {
       });
     }
 
+    // The SPA shell.
+    //
+    // Assets are served by the asset server *before* the Worker runs, so any
+    // non-/api path that gets here matched no file on disk: it is a client-side
+    // route (`/?tab=company&ticker=2330` deep link, or a stale bookmark). Serve
+    // index.html and let the router resolve it.
+    //
+    // This sits ahead of the access gate on purpose. `/` is already served
+    // without a credential by the asset server, so gating a deep link would
+    // break bookmarks without protecting anything - the shell contains no
+    // figures, and every /api/* call it then makes goes through the gate below.
+    if (
+      env.ASSETS &&
+      !path.startsWith("/api/") &&
+      (request.method === "GET" || request.method === "HEAD")
+    ) {
+      return env.ASSETS.fetch(new Request(new URL("/index.html", url), request));
+    }
+
     const access = await checkAccess(request, env);
     if (!access.ok) {
       // The reason goes to the log, not to the client - "aud mismatch" vs "bad
@@ -59,10 +78,8 @@ export default {
       }
     }
 
-    // The SPA. Any non-/api path falls through to the asset handler, which serves
-    // index.html for unknown paths so client-side routing works on a deep link.
-    if (env.ASSETS) return env.ASSETS.fetch(request);
-
+    // Only reachable when the dashboard has not been built into public/, so
+    // env.ASSETS is undefined and the SPA branch above did not fire.
     return new Response(landing(env), {
       status: path === "/" ? 200 : 404,
       headers: { "content-type": "text/plain; charset=utf-8" },
