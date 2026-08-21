@@ -1,0 +1,365 @@
+# Taiwan semiconductor supply-chain revenue tracker - ticker universe.
+#
+# This file is the single source of truth for bucket, tier and lifecycle.
+# It is loaded by the Python ingest and mirrored into the D1 `universe` table,
+# so the scraper, the API and the dashboard all read the same values.
+#
+# Editing rules:
+#   - `ticker` MUST be quoted. Unquoted 2330 becomes an int and silently breaks joins.
+#   - `market_hint` is a HINT ONLY. Resolution is "whichever source actually has the
+#     row", so a TPEx -> TWSE transfer needs no edit here; it raises MARKET_CHANGED.
+#   - To retire a name, set `status` and `active_to`. Never delete the entry - that
+#     would drop its history from the output.
+#   - `name_zh` is the as-of-2026-08 reported name, used only for display convenience.
+#     The authoritative per-month reported name lives in raw_revenue.company_name.
+#
+# Verified 2026-08-21 against openapi.twse.com.tw t187ap05_L and
+# tpex.org.tw mopsfin_t187ap05_O.
+
+version: 1
+
+buckets:
+  - AI Silicon
+  - Advanced Packaging / Test
+  - Substrate / AI PCB / Materials
+  - Rack / ODM
+  - Networking
+  - Thermal
+  - Power / Data Center Electrical
+  - Semi Equipment / Consumables
+  - Legacy / Mature Node Control Group
+  - Analog Cycle
+
+tickers:
+  # ---------------------------------------------------------------- AI Silicon
+  - ticker: "2330"
+    display_name: TSMC
+    name_zh: 台積電
+    bucket: AI Silicon
+    tier: 1
+    market_hint: sii
+    thesis: Broad AI silicon demand, but diluted by non-AI
+
+  - ticker: "3443"
+    display_name: Global Unichip
+    name_zh: 創意
+    bucket: AI Silicon
+    tier: 1
+    market_hint: sii
+    thesis: Custom AI ASIC / hyperscaler silicon ramp
+
+  - ticker: "3661"
+    display_name: Alchip
+    name_zh: 世芯-KY
+    bucket: AI Silicon
+    tier: 1
+    market_hint: sii
+    thesis: Custom ASIC demand, especially hyperscaler programs
+    notes: >-
+      Cayman-registered (-KY). Files the FOREIGN-ISSUER form: 合併營業收入淨額
+      (CONSOLIDATED) in a three-column table, TWD alongside a USD functional
+      currency. We take the TWD column. Its revenue LEVEL is therefore not
+      directly comparable with the standalone filers in this universe; growth
+      rates are. Verified 2026-08-21.
+
+  # ------------------------------------------------ Advanced Packaging / Test
+  - ticker: "3711"
+    display_name: ASE Technology
+    name_zh: 日月光投控
+    bucket: Advanced Packaging / Test
+    tier: 1
+    market_hint: sii
+    thesis: Advanced packaging / backend volume
+    notes: Holding company; reports consolidated group revenue.
+
+  - ticker: "2449"
+    display_name: KYEC
+    name_zh: 京元電子
+    bucket: Advanced Packaging / Test
+    tier: 1
+    market_hint: sii
+    thesis: AI/HPC test demand; useful downstream silicon confirmation
+
+  - ticker: "6239"
+    display_name: Powertech
+    name_zh: 力成
+    bucket: Advanced Packaging / Test
+    tier: 2
+    market_hint: sii
+    thesis: Memory/backend cycle
+
+  - ticker: "6147"
+    display_name: Chipbond
+    name_zh: 頎邦
+    bucket: Advanced Packaging / Test
+    tier: 2
+    market_hint: otc
+    thesis: More DDIC/display-heavy; weaker AI signal
+
+  # ------------------------------------- Substrate / AI PCB / Materials
+  - ticker: "3037"
+    display_name: Unimicron
+    name_zh: 欣興
+    bucket: Substrate / AI PCB / Materials
+    tier: 1
+    market_hint: sii
+    thesis: ABF substrate / advanced package demand
+
+  - ticker: "3189"
+    display_name: Kinsus
+    name_zh: 景碩
+    bucket: Substrate / AI PCB / Materials
+    tier: 1
+    market_hint: sii
+    thesis: ABF substrate / HPC exposure
+
+  - ticker: "8046"
+    display_name: Nan Ya PCB
+    name_zh: 南電
+    bucket: Substrate / AI PCB / Materials
+    tier: 1
+    market_hint: sii
+    thesis: ABF substrate demand
+
+  - ticker: "2383"
+    display_name: Elite Material
+    name_zh: 台光電
+    bucket: Substrate / AI PCB / Materials
+    tier: 1
+    market_hint: sii
+    thesis: High-speed CCL; very useful AI server/network PCB indicator
+
+  - ticker: "2368"
+    display_name: Gold Circuit Electronics
+    name_zh: 金像電
+    bucket: Substrate / AI PCB / Materials
+    tier: 1
+    market_hint: sii
+    thesis: AI server PCB demand
+
+  # ------------------------------------------------------------- Rack / ODM
+  - ticker: "6669"
+    display_name: Wiwynn
+    name_zh: 緯穎
+    bucket: Rack / ODM
+    tier: 1
+    market_hint: sii
+    thesis: One of the cleanest hyperscaler AI server signals
+
+  - ticker: "2382"
+    display_name: Quanta
+    name_zh: 廣達
+    bucket: Rack / ODM
+    tier: 1
+    market_hint: sii
+    thesis: AI server / rack build
+
+  - ticker: "3231"
+    display_name: Wistron
+    name_zh: 緯創
+    bucket: Rack / ODM
+    tier: 1
+    market_hint: sii
+    thesis: AI server / rack build
+
+  - ticker: "2317"
+    display_name: Hon Hai
+    name_zh: 鴻海
+    bucket: Rack / ODM
+    tier: 1
+    market_hint: sii
+    thesis: Huge AI rack exposure, though diversified
+
+  - ticker: "2356"
+    display_name: Inventec
+    name_zh: 英業達
+    bucket: Rack / ODM
+    tier: 2
+    market_hint: sii
+    thesis: Server demand, less AI-pure
+
+  - ticker: "2376"
+    display_name: Gigabyte
+    name_zh: 技嘉
+    bucket: Rack / ODM
+    tier: 2
+    market_hint: sii
+    thesis: GPU/enterprise server demand, but broader product mix
+
+  # ------------------------------------------------------------ Networking
+  - ticker: "2345"
+    display_name: Accton
+    name_zh: 智邦
+    bucket: Networking
+    tier: 1
+    market_hint: sii
+    thesis: AI Ethernet switching / network build-out
+
+  # --------------------------------------------------------------- Thermal
+  - ticker: "3017"
+    display_name: Asia Vital Components
+    name_zh: 奇鋐
+    bucket: Thermal
+    tier: 1
+    market_hint: sii
+    thesis: Liquid-cooling adoption / GPU rack thermal intensity
+
+  - ticker: "3324"
+    display_name: Auras
+    name_zh: 雙鴻
+    bucket: Thermal
+    tier: 1
+    market_hint: otc
+    thesis: AI thermal demand
+
+  - ticker: "3653"
+    display_name: Jentech Precision
+    name_zh: 健策
+    bucket: Thermal
+    tier: 1
+    market_hint: sii
+    thesis: GPU package thermal / heat-spreader intensity
+
+  - ticker: "2421"
+    display_name: Sunonwealth
+    name_zh: 建準
+    bucket: Thermal
+    tier: 2
+    market_hint: sii
+    thesis: Fans / thermal systems; useful but broader
+
+  # ------------------------------------------- Power / Data Center Electrical
+  - ticker: "2308"
+    display_name: Delta Electronics
+    name_zh: 台達電
+    bucket: Power / Data Center Electrical
+    tier: 1
+    market_hint: sii
+    thesis: AI DC power density + PSU/cooling demand
+
+  - ticker: "2301"
+    display_name: Lite-On
+    name_zh: 光寶科
+    bucket: Power / Data Center Electrical
+    tier: 1
+    market_hint: sii
+    thesis: Server PSU / power electronics
+
+  - ticker: "6412"
+    display_name: Chicony Power
+    name_zh: 群電
+    bucket: Power / Data Center Electrical
+    tier: 1
+    market_hint: sii
+    thesis: Server power supply demand
+
+  # ------------------------------------------- Semi Equipment / Consumables
+  - ticker: "3680"
+    display_name: Gudeng
+    name_zh: 家登
+    bucket: Semi Equipment / Consumables
+    tier: 1
+    market_hint: otc
+    thesis: EUV / advanced-node fab activity
+
+  - ticker: "1560"
+    display_name: Kinik
+    name_zh: 中砂
+    bucket: Semi Equipment / Consumables
+    tier: 2
+    market_hint: sii
+    thesis: Wafer/process consumables (Disco)
+
+  - ticker: "5434"
+    display_name: Topco Scientific
+    name_zh: 崇越
+    bucket: Semi Equipment / Consumables
+    tier: 2
+    market_hint: sii
+    thesis: Semiconductor materials, but broad
+
+  # ------------------------------- Legacy / Mature Node Control Group
+  - ticker: "2303"
+    display_name: UMC
+    name_zh: 聯電
+    bucket: Legacy / Mature Node Control Group
+    tier: 2
+    market_hint: sii
+    thesis: Mature-node cycle control
+
+  - ticker: "5347"
+    display_name: VIS
+    name_zh: 世界
+    bucket: Legacy / Mature Node Control Group
+    tier: 2
+    market_hint: otc
+    thesis: Analog/power/mature-node foundry cycle
+
+  - ticker: "6770"
+    display_name: PSMC
+    name_zh: 力積電
+    bucket: Legacy / Mature Node Control Group
+    tier: 2
+    market_hint: sii
+    thesis: Commodity/mature-node semiconductor cycle
+
+  # ---------------------------------------------------------- Analog Cycle
+  - ticker: "6138"
+    display_name: Anpec
+    name_zh: 茂達
+    bucket: Analog Cycle
+    tier: 1
+    market_hint: otc
+    thesis: Power management ICs, DC/DC, motor drivers
+
+  - ticker: "8081"
+    display_name: Global Mixed-Mode
+    name_zh: 致新
+    bucket: Analog Cycle
+    tier: 1
+    market_hint: sii
+    thesis: Power management / mixed-signal
+    notes: Verified on TWSE t187ap05_L, NOT on TPEx despite the 8xxx code.
+
+  - ticker: "4919"
+    display_name: Nuvoton
+    name_zh: 新唐
+    bucket: Analog Cycle
+    tier: 1
+    market_hint: sii
+    thesis: MCU + analog/mixed signal, industrial/consumer/auto
+
+  - ticker: "6286"
+    display_name: Richtek
+    name_zh: 立錡
+    bucket: Analog Cycle
+    tier: 1
+    market_hint: otc
+    status: merged
+    successor: "2454"
+    thesis: Broad power-management IC portfolio
+    notes: >-
+      NO DATA AVAILABLE. Absorbed into MediaTek (2454); ceased to be a public
+      issuer, so the monthly filing obligation ended. MOPS returns
+      "該 6286 公開發行公司不繼續公開發行". Confirmed absent from TWSE _L,
+      TPEx _O, emerging-board _R and the bulk OTC monthly page on 2026-08-21.
+      Kept in the universe deliberately so the gap renders as an explicit
+      "no data" row rather than silently disappearing. Excluded from coverage
+      checks. Successor is recorded but NEVER spliced into this series -
+      splicing would corrupt YoY.
+
+  - ticker: "6415"
+    display_name: Silergy
+    name_zh: 矽力*-KY
+    bucket: Analog Cycle
+    tier: 1
+    market_hint: sii
+    thesis: Power management, industrial/consumer/cloud
+    notes: >-
+      Brief listed tier as "1/2"; recorded as 1. Cayman-registered (-KY).
+      Verified on TWSE t187ap05_L, NOT on TPEx.
+      Files the FOREIGN-ISSUER form: 合併營業收入淨額 (CONSOLIDATED) in a
+      three-column table, TWD alongside a USD functional currency. We take the
+      TWD column. Its revenue LEVEL is therefore not directly comparable with
+      the standalone filers in this universe; growth rates are.
+      Verified 2026-08-21.

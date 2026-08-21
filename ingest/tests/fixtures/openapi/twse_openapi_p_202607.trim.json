@@ -1,0 +1,10 @@
+{
+  "source_id": "twse_openapi_p",
+  "month": "2026-07",
+  "source_url": "https://openapi.twse.com.tw/v1/opendata/t187ap05_P",
+  "original_records": 296,
+  "kept_records": 6,
+  "universe_records": 0,
+  "non_universe_records": 6,
+  "note": "trimmed from the live snapshot; records are verbatim, the count is not"
+}

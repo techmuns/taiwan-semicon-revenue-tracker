@@ -12,7 +12,16 @@ binding = "DB"
 database_name = "taiwan-semicon-revenue"
 database_id = "da985a76-0e1a-4100-abd4-48c21687c290"
 
-# Cron triggers are intentionally NOT configured yet - there is no scheduled()
-# handler to run. Added in the refresh phase:
-#   [triggers]
-#   crons = ["0 1 11,14,18 * *"]   # UTC; TW filing deadline is the 10th
+# UTC. Taiwan's filing deadline is the 10th of the following month, so the 11th
+# is the first day the month is complete; the 14th and 18th sweep up late filers
+# and restatements. Three runs are safe because every write is gated on row_hash,
+# so a run that finds nothing new writes nothing.
+[triggers]
+crons = ["0 1 11,14,18 * *"]
+
+# The [assets] binding is added when web/ is built into public/. Until then the
+# Worker serves a plain landing page and env.ASSETS is undefined - see the
+# ASSETS comment in src/api.ts.
+#   [assets]
+#   directory = "public"
+#   binding = "ASSETS"

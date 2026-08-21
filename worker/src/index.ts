@@ -1,57 +1,143 @@
 /**
- * Taiwan semiconductor supply-chain monthly revenue tracker.
+ * Worker entrypoint: router, access gate, cron hook.
  *
- * Phase 3 stub: proves deployment, D1 connectivity, and the public URL.
- * The real API surface (/api/analytics, /api/heatmap, ...) lands after the
- * schema and backfill are in place.
+ * Route order is the contract:
+ *
+ *   1. /api/health  - ALWAYS open. A monitor must be able to see "up" without a
+ *                     credential, and the response carries no revenue figures.
+ *   2. /auth        - open by construction; it is how a credential is obtained.
+ *   3. everything   - behind checkAccess().
+ *
+ * The gate is applied ONCE here rather than per-handler. A per-handler check is
+ * the shape where a route added later is silently public.
  */
 
-export interface Env {
-  DB: D1Database;
-}
+import { checkAccess, clearSessionCookie, handleAuth, accessMode } from "./access";
+import { handleApi, json, type Env } from "./api";
+import { runRefresh } from "./cron";
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const path = url.pathname.replace(/\/+$/, "") || "/";
 
-    if (url.pathname === "/api/health") {
-      return json(await health(env));
+    if (request.method === "OPTIONS") return preflight();
+
+    // Open routes, in the order given above.
+    if (path === "/api/health") return handleApi(request, env, "/api/health");
+    if (path === "/auth") return handleAuth(request, env);
+    if (path === "/logout") {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "set-cookie": clearSessionCookie(),
+        },
+      });
     }
 
-    if (url.pathname === "/") {
-      return new Response(
-        "taiwan-semicon-revenue-tracker\n\nnot built yet - see /api/health\n",
-        { headers: { "content-type": "text/plain; charset=utf-8" } },
-      );
+    const access = await checkAccess(request, env);
+    if (!access.ok) {
+      // The reason goes to the log, not to the client - "aud mismatch" vs "bad
+      // signature" tells an attacker which half of the token to fix.
+      console.log(`access denied: mode=${access.mode} reason=${access.reason} path=${path}`);
+      return unauthorized(access.mode, path);
     }
 
-    return json({ error: "not found", path: url.pathname }, 404);
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return json({ error: "read-only API", method: request.method }, 405);
+    }
+
+    if (path.startsWith("/api/")) {
+      try {
+        return await handleApi(request, env, path);
+      } catch (err) {
+        // A D1 error must not become an opaque 1101. The message names the query
+        // surface so a schema change is diagnosable from the response alone.
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`api error path=${path}: ${message}`);
+        return json({ error: "query failed", path, detail: message }, 500);
+      }
+    }
+
+    // The SPA. Any non-/api path falls through to the asset handler, which serves
+    // index.html for unknown paths so client-side routing works on a deep link.
+    if (env.ASSETS) return env.ASSETS.fetch(request);
+
+    return new Response(landing(env), {
+      status: path === "/" ? 200 : 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  },
+
+  /**
+   * Monthly refresh.
+   *
+   * AWAITED, not ctx.waitUntil'd. There is no client waiting on a cron, so
+   * backgrounding buys nothing and costs the two things that matter: the
+   * runtime's own success/failure accounting (which is what the dashboard's cron
+   * history shows) and the guarantee that the work finishes before the
+   * invocation ends. A silent cron is the failure mode that takes a month to
+   * notice, so the error is logged with the expression that produced it and then
+   * re-thrown to mark the invocation failed.
+   */
+  async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      await runRefresh(env, event.cron);
+    } catch (err) {
+      console.error(`cron ${event.cron} failed: ${err instanceof Error ? err.stack : err}`);
+      throw err;
+    }
   },
 } satisfies ExportedHandler<Env>;
 
-async function health(env: Env) {
-  const out: Record<string, unknown> = {
-    ok: true,
-    service: "taiwan-semicon-revenue-tracker",
-    phase: "3-stub",
+// ------------------------------------------------------------------ helpers --
+
+function unauthorized(mode: string, path: string): Response {
+  const body = {
+    error: "unauthorized",
+    mode,
+    path,
+    hint:
+      mode === "secret"
+        ? "POST /auth with {\"key\":\"...\"}, or send an X-Dashboard-Key header"
+        : "reach this Worker through Cloudflare Access",
   };
-
-  // Confirm the D1 binding is actually wired up, without assuming any schema exists.
-  try {
-    const row = await env.DB.prepare(
-      "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'",
-    ).first<{ n: number }>();
-    out.d1 = { bound: true, tables: row?.n ?? 0 };
-  } catch (err) {
-    out.d1 = { bound: false, error: err instanceof Error ? err.message : String(err) };
-  }
-
-  return out;
+  return new Response(JSON.stringify(body, null, 2), {
+    status: 401,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      // Not WWW-Authenticate: Basic - that triggers the browser's native prompt,
+      // which cannot be styled and offers no way out but closing the tab.
+      "x-access-mode": mode,
+    },
+  });
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body, null, 2), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+/** No CORS by default: the dashboard is served from this same origin. */
+function preflight(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: { allow: "GET, HEAD, POST, OPTIONS", "cache-control": "no-store" },
   });
+}
+
+function landing(env: Env): string {
+  const mode = accessMode(env);
+  return [
+    "taiwan-semicon-revenue-tracker",
+    "",
+    "The dashboard assets are not deployed yet. The API is live:",
+    "",
+    "  GET /api/health          (always open)",
+    "  GET /api/meta",
+    "  GET /api/analytics?from=2026-01&to=2026-07",
+    "  GET /api/heatmap?metric=yoy_acceleration_ppt&group=bucket",
+    "  GET /api/company/2330",
+    "  GET /api/quality",
+    "  GET /api/export.csv",
+    "",
+    `access mode: ${mode}${mode === "open" ? "  <-- NO ACCESS CONTROL" : ""}`,
+    "",
+  ].join("\n");
 }

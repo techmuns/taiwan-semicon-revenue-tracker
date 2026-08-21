@@ -1,0 +1,3 @@
+# Captured upstream responses are evidence: preserve their exact bytes.
+# Line-ending normalization would silently change what we claim the server sent.
+ingest/tests/fixtures/** -text

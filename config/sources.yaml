@@ -1,0 +1,95 @@
+# Data sources, exactly as specified in the project brief.
+#
+# Both endpoints below are the brief's endpoints, verbatim. Nothing is substituted.
+# Where a live check found a gap, it is recorded here as an observation plus a
+# declared fallback - config, not code, so the precedence is visible and editable
+# without a deploy.
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# Historical backfill: MOPS per-company monthly query.
+# One request per (company, month). {MM} and the yearmonth suffix ARE zero-padded.
+# Returns UTF-8 HTML. The revenue figures are in TWD thousands.
+# ---------------------------------------------------------------------------
+backfill:
+  source_id: mops_company
+  url_template: >-
+    https://mopsov.twse.com.tw/mops/web/ajax_t05st10_ifrs?firstin=true&off=1&step=0&co_id={code}&year={roc_year}&month={mm}&yearmonth={roc_year}{mm}
+  encoding: utf-8
+  # Politeness: 296 requests for the Dec-2025..Jul-2026 window. Serial, never concurrent.
+  min_interval_s: 3.0
+  timeout_s: 45
+  max_attempts: 5
+  backoff_s: [5, 15, 45, 90]
+  # A valid response always contains this string in the revenue table header.
+  body_anchor: 營業收入淨額
+  # Responses that are legitimately "no data" rather than failures. Both arrive
+  # as HTTP 200 with a short body, so they must be classified by content -
+  # retrying them would burn 5 attempts and still (correctly) find nothing.
+  # Strings below are verbatim from live 2026-08-21 responses.
+  known_empty_markers:
+    not_an_issuer: 公開發行公司不繼續公開發行   # 6286 Richtek - filing obligation ended
+    no_data: 查無需求資料                      # month not published, or never filed
+  min_body_bytes: 1500
+
+  # Asserted on every response. If MOPS ever reports in 元 rather than 仟元, the
+  # figures would be 1000x off with no other visible symptom, so a missing
+  # declaration is a hard failure rather than a warning.
+  unit_anchor: 單位：新台幣仟元
+
+# ---------------------------------------------------------------------------
+# Ongoing monthly refresh: TWSE Open API.
+# t187ap05_P is the brief's specified feed and stays first in precedence.
+#
+# Live check 2026-08-21: _P returned 296 records, all 產業別=證券, and 0 of our
+# 37 tickers - it is the 公開發行公司 (non-listed public issuers) dataset. The
+# two fallbacks below cover 36 of 37. The cron walks this list in order and
+# records which feed each row came from in raw_revenue.source_id, so if _P ever
+# starts carrying listed companies the switch shows up in the data with no code
+# change. Do not reorder without also updating the analytics_monthly precedence.
+# ---------------------------------------------------------------------------
+refresh:
+  swagger: https://openapi.twse.com.tw/v1/swagger.json
+  feeds:
+    - source_id: twse_openapi_p
+      role: specified          # named in the brief
+      url: https://openapi.twse.com.tw/v1/opendata/t187ap05_P
+      market: null
+      expect_min_records: 200
+      expect_target_coverage: 0     # documented as observed, not aspirational
+      anchor_tickers: []
+      notes: >-
+        公開發行公司 (non-listed public issuers). Verified to contain none of the
+        universe. Emits a SOURCE_EMPTY finding rather than an error so the cron
+        continuing down the chain is legible in the data.
+
+    - source_id: twse_openapi_l
+      role: fallback
+      url: https://openapi.twse.com.tw/v1/opendata/t187ap05_L
+      market: sii
+      expect_min_records: 900
+      expect_target_coverage: 31
+      anchor_tickers: ["2330", "2317"]
+      notes: 上市 / TWSE-listed. Also carries 6415 and 8081 despite their codes.
+
+    - source_id: tpex_openapi_o
+      role: fallback
+      url: https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O
+      market: otc
+      expect_min_records: 700
+      expect_target_coverage: 5
+      anchor_tickers: ["6147", "3324"]
+      notes: 上櫃 / TPEx-listed. Covers 6147, 3324, 3680, 5347, 6138.
+
+  # All three feeds are latest-month snapshots only (every record carried
+  # 資料年月 "11507"), so none can backfill. Derive the month from 資料年月,
+  # never from the clock.
+  month_field: 資料年月
+
+# MOPS emits this in percentage fields when the denominator is zero or the
+# result overflows the field. It is a sentinel, not a value: map it to NULL.
+percent_sentinel: 999999.99
+
+# Revenue everywhere is TWD thousands. Recorded so the unit is asserted, not assumed.
+revenue_unit: twd_thousands

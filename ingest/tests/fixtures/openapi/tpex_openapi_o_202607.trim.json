@@ -1,0 +1,10 @@
+{
+  "source_id": "tpex_openapi_o",
+  "month": "2026-07",
+  "source_url": "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O",
+  "original_records": 890,
+  "kept_records": 11,
+  "universe_records": 5,
+  "non_universe_records": 6,
+  "note": "trimmed from the live snapshot; records are verbatim, the count is not"
+}
