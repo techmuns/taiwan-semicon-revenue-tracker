@@ -1,0 +1,1 @@
+# taiwan-semicon-revenue-tracker
