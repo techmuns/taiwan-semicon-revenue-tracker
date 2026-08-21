@@ -110,6 +110,27 @@ per-company MOPS endpoint carries no 上月營收, so January 2026 has no MoM wi
 holding December's own level; and January's `prior_month_yoy_pct` needs
 December's YoY. It is stored and excluded from the default window.
 
+## The dashboard
+
+Six tabs, one shared filter state, all of it in the URL — so any view can be
+sent to someone else and arrive identical.
+
+| Tab | What it answers |
+|---|---|
+| Overview | Which stage of the chain is inflecting, and a summary of the latest month |
+| Acceleration | Company × month, strongest latest month first |
+| Company | One name: series, and the as-filed rows every number came from |
+| Buckets | Rebased revenue index per stage, ten facets on one shared scale |
+| Data | The twelve columns, sortable, identical to the CSV export |
+| Quality | Coverage, findings, cross-source agreement, fetch log |
+
+Every chart can be **redrawn as a table of numbers** — one toggle per screen,
+graph by default, `viz=table` in the URL when it isn't. It exists because a
+figure that is going to be quoted should be read rather than estimated off an
+axis, and because it is the accessibility relief for the one series hue that
+falls under the 3:1 contrast floor. Nulls render as an em dash and never as
+zero, in either view.
+
 ## Tests
 
 ```bash

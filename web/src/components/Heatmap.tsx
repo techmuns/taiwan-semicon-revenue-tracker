@@ -241,9 +241,9 @@ export function Heatmap({
             left: Math.max(4, tip.x - 90),
             top: Math.max(4, tip.y + 14),
             pointerEvents: "none",
-            background: "rgba(255,255,255,0.98)",
+            background: "var(--card-bg)",
             border: "1px solid var(--border-solid)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-control)",
             boxShadow: "0 4px 12px rgba(0,0,0,0.10)",
             padding: "6px 9px",
             fontSize: 12,
@@ -297,7 +297,7 @@ export function Legend({ metric }: { metric: HeatmapMetric }) {
               height: 14,
               borderRadius: 3,
               background: s.fill,
-              border: "1px solid rgba(0,0,0,0.06)",
+              border: "1px solid var(--border-solid)",
             }}
           />
           <span className="tnum">{s.label}</span>
@@ -315,8 +315,8 @@ export function Legend({ metric }: { metric: HeatmapMetric }) {
             borderRadius: 3,
             background: "var(--cell-missing-bg)",
             backgroundImage:
-              "repeating-linear-gradient(45deg, transparent, transparent 3px, #e8e6e0 3px, #e8e6e0 4px)",
-            border: "1px solid rgba(0,0,0,0.06)",
+              "repeating-linear-gradient(45deg, transparent, transparent 3px, var(--hatch-line) 3px, var(--hatch-line) 4px)",
+            border: "1px solid var(--border-solid)",
           }}
         />
         no data

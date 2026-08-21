@@ -126,7 +126,7 @@ export function cellStyle(value: number | null | undefined, metric: HeatmapMetri
       color: "var(--cell-missing-ink)",
       // 45-degree hatch: the accessibility channel, and unmistakably not a value.
       backgroundImage:
-        "repeating-linear-gradient(45deg, transparent, transparent 3px, #e8e6e0 3px, #e8e6e0 4px)",
+        "repeating-linear-gradient(45deg, transparent, transparent 3px, var(--hatch-line) 3px, var(--hatch-line) 4px)",
     };
   }
   return { background: FILL[band], color: INK[band] };

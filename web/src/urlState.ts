@@ -13,6 +13,7 @@ import type { FilterState } from "./api";
 import type { HeatmapMetric } from "./types";
 import { TABS } from "./components/Header";
 import type { Tab } from "./components/Header";
+import type { ViewMode } from "./components/controls";
 
 export interface ViewState {
   tab: Tab;
@@ -20,6 +21,8 @@ export interface ViewState {
   ticker: string | null;
   metric: HeatmapMetric;
   agg: "weighted" | "equal";
+  /** Graph or table, for every widget that has both. Graph is the default. */
+  viz: ViewMode;
   /** True when the URL carried an explicit `from`, so the server default must not override it. */
   fromExplicit: boolean;
 }
@@ -55,6 +58,8 @@ export function readView(): ViewState {
     ticker: p.get("ticker"),
     metric,
     agg: p.get("agg") === "equal" ? "equal" : "weighted",
+    // Graph unless the URL says otherwise, so a bare link always opens on charts.
+    viz: p.get("viz") === "table" ? "table" : "chart",
     fromExplicit: from !== null,
     filters: {
       from: from ?? EMPTY_FILTERS.from,
@@ -88,6 +93,7 @@ export function writeView(v: ViewState): void {
   if (v.ticker) p.set("ticker", v.ticker);
   if (v.metric !== "yoy_acceleration_ppt") p.set("metric", v.metric);
   if (v.agg !== "weighted") p.set("agg", v.agg);
+  if (v.viz !== "chart") p.set("viz", v.viz);
   const next = `${location.pathname}?${p.toString()}`;
   if (next !== `${location.pathname}${location.search}`) {
     history.replaceState(null, "", next);

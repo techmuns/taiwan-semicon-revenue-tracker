@@ -3,8 +3,13 @@
  *
  * Two sources, kept in separate blocks on purpose:
  *
- *  - UI CHROME follows the house dashboard standard: indigo primary plus
- *    grayscale, 48px header, 16px card radius, the exact surface values below.
+ *  - UI CHROME follows the house dashboard standard on structure - indigo primary
+ *    plus grayscale, a 48px header, one card shell for every widget. It diverges
+ *    on the DECORATION: flat opaque surfaces instead of translucent blurred ones,
+ *    a 10px radius instead of 16px, hairline borders instead of shadows, and no
+ *    hover lift. Recorded in docs/RUNBOOK.md. The reason is that this dashboard is
+ *    read for eight-digit revenue figures and signed percentage points, and every
+ *    gradient, blur, and drop shadow competes with the marks for attention.
  *  - DATA MARKS follow the data-viz palette, which is a different job. Chart
  *    color encodes magnitude and polarity; chrome color encodes interaction
  *    state. Mixing them is how a dashboard ends up with a bright category hue
@@ -12,6 +17,9 @@
  *
  * Text never wears a series color. Values, labels, and legends stay in the ink
  * tokens; a colored swatch beside them carries the identity.
+ *
+ * Indigo is the ONLY hue in the chrome, and it appears only on interaction state:
+ * the selected tab, a pressed chip, the focus ring. Nothing decorative is colored.
  */
 
 :root {
@@ -21,34 +29,73 @@
   --primary-border: #e0e7ff;
   --primary-text: #4338ca;
 
-  --page-bg: linear-gradient(to bottom, rgba(249, 250, 251, 0.8), #ffffff);
-  --card-bg: rgba(255, 255, 255, 0.9);
-  --card-header-bg: rgba(255, 255, 255, 0.95);
-  --card-body-bg: rgba(249, 250, 251, 0.5);
-  --header-bg: rgba(255, 255, 255, 0.95);
-  --border: rgba(229, 231, 235, 0.8);
-  --border-solid: #e5e7eb;
-  --border-hover: rgba(79, 70, 229, 0.2);
+  /*
+   * Flat and opaque. The page is a shade of gray so that a white card reads as a
+   * plane sitting on it - which is the whole job the old blur and drop shadow were
+   * doing, done with one value instead of three effects.
+   */
+  --page-bg: #f4f5f7;
+  --card-bg: #ffffff;
+  --card-header-bg: #ffffff;
+  --card-body-bg: #ffffff;
+  --header-bg: #ffffff;
+  /* The track behind a segmented control - the one non-white chrome fill. */
+  --track: #f1f2f4;
 
-  --text-primary: #111827;
-  --text-secondary: #374151;
-  --text-muted: #6b7280;
-  --text-hint: #9ca3af;
+  --border: #e8eaed;
+  --border-solid: #dfe2e6;
+  --border-hover: #cfd4da;
+
+  /*
+   * A neutral ink ramp, not a blue-tinted one. With the grays neutral, indigo is
+   * unmistakably an accent rather than a slightly stronger version of the text.
+   */
+  --text-primary: #10151c;
+  --text-secondary: #3a424d;
+  --text-muted: #6b737f;
+  --text-hint: #98a0ab;
 
   --error-red: #ef4444;
   --error-bg: #fef2f2;
+  --error-border: #fecaca;
 
-  --radius-card: 16px;
+  /*
+   * The one status chip in the chrome - "open access". Amber, and it always ships
+   * with the word beside it, never the color alone. Text is 8.0:1 on its own fill.
+   */
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-text: #92400e;
+
+  /*
+   * Signed ink for a headline figure. Red = up, the same Taiwanese convention the
+   * heatmap arms use. Both clear 4.5:1 on white (7.1:1 and 6.2:1), and neither is
+   * the only carrier of the sign - the number beside it keeps its + or -.
+   */
+  --ink-up: #a52a2a;
+  --ink-down: var(--seq-550);
+
+  --radius-card: 10px;
+  --radius-control: 6px;
   --header-h: 48px;
-  --grid-gap: 20px;
-  --ease: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  --control-h: 26px;
+  --grid-gap: 14px;
+  --main-pad: 18px 22px;
+  /* Fast. A 350ms transition on chrome reads as a consumer app, not an instrument. */
+  --ease: all 0.14s cubic-bezier(0.2, 0, 0.2, 1);
 
   /* -------------------------------------------------------- data marks -- */
-  /* The surface charts actually render on: the card body, not the page. */
-  --chart-surface: #f8f9fa;
-  --grid-line: #e1e0d9;
-  --axis-line: #c3c2b7;
-  --ink-muted: #898781;
+  /* The surface charts actually render on: the card body, which is now white. */
+  --chart-surface: #ffffff;
+  --grid-line: #e9eaec;
+  --axis-line: #c3c7cc;
+  --ink-muted: #858c96;
+  /* The hatch stroke for an absent value. Texture is the encoding, not the hue. */
+  --hatch-line: #e4e6e9;
+
+  /* Ink for a mark that sits ON a light step of the sequential ramp (100-250).
+     5.5:1 against --seq-250, so a glyph inside a filled cell stays legible. */
+  --ink-on-seq: #1c3a5e;
 
   /* Sequential blue - continuous magnitude (revenue). Light = near zero. */
   --seq-100: #cde2fb;
@@ -65,8 +112,8 @@
    * Taiwanese filings, so red = accelerating.
    *
    * Because that convention is not universal, color never carries the sign
-   * alone: every cell prints its signed value, and the legend states the
-   * direction in words.
+   * alone: every cell prints its signed value, the legend states the direction in
+   * words, and the same matrix is one click away as a plain table of numbers.
    *
    * The blue arm is the documented sequential blue at steps 150/400/600. The red
    * arm is NOT hand-picked: each step was computed in OKLCH to match its blue
@@ -109,7 +156,7 @@ body {
 body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
@@ -121,6 +168,15 @@ body {
 /* Tabular figures only where columns must align vertically. */
 .tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/* An uppercase micro-label. The one piece of styled text used as a section mark. */
+.eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-hint);
 }
 
 /* ------------------------------------------------------------- shimmer -- */
@@ -135,10 +191,10 @@ body {
 }
 
 .shimmer {
-  background-image: linear-gradient(90deg, #e5e7eb 0%, #f3f4f6 50%, #e5e7eb 100%);
+  background-image: linear-gradient(90deg, #eceef1 0%, #f6f7f8 50%, #eceef1 100%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -152,6 +208,15 @@ body {
 
 /* ---------------------------------------------------------- widget card -- */
 
+/*
+ * One hairline border, no shadow, no blur, no lift.
+ *
+ * The card used to rise 4px and cast a 40px indigo-tinted shadow on hover. Two
+ * problems with that on this dashboard: nothing about a card is clickable, so the
+ * motion promised an affordance that does not exist; and on a screen holding ten
+ * of them, moving the pointer across the grid set off a wave of animation over the
+ * numbers being read. Hover now moves the border one step darker and nothing else.
+ */
 .widget-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -159,24 +224,16 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-  transition: var(--ease);
+  transition: border-color 0.14s cubic-bezier(0.2, 0, 0.2, 1);
 }
 
 .widget-card:hover {
-  transform: translateY(-4px);
   border-color: var(--border-hover);
-  box-shadow:
-    0 20px 40px rgba(0, 0, 0, 0.08),
-    0 8px 16px rgba(79, 70, 229, 0.06);
 }
 
-/* Cards holding a wide matrix or a long table should not lift under the cursor -
-   the motion fights horizontal scrolling and re-triggers on every cell hover. */
+/* Anything scrollable or cell-hoverable keeps a fixed border: a matrix whose frame
+   changes color as the pointer crosses its cells is a distraction, not feedback. */
 .widget-card--static:hover {
-  transform: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   border-color: var(--border);
 }
 
@@ -184,8 +241,8 @@ body {
 
 :focus-visible {
   outline: 2px solid var(--primary);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline-offset: 1px;
+  border-radius: 3px;
 }
 
 /* Buttons and inputs inherit the system face rather than the UA default. */

@@ -25,8 +25,7 @@ export function Sources({ meta, now }: { meta: Meta; now: number }) {
     <>
       <WidgetCard
         title="Sources"
-        subtitle="Which feed each row came from · precedence is config, not code"
-        category="tools"
+        subtitle="Which feed each row came from · precedence is config"
         staticCard
       >
         <div style={{ padding: "4px 0" }}>
@@ -70,7 +69,6 @@ export function Sources({ meta, now }: { meta: Meta; now: number }) {
       <WidgetCard
         title="Freshness"
         subtitle="Companies with a filing, by month, newest first"
-        category="tools"
         staticCard
       >
         <div style={{ maxHeight: 260, overflow: "auto" }}>
@@ -104,7 +102,6 @@ export function Sources({ meta, now }: { meta: Meta; now: number }) {
       <WidgetCard
         title="Method and units"
         subtitle="What the numbers mean before you quote them"
-        category="tools"
         staticCard
       >
         <div

@@ -1,8 +1,13 @@
 /**
- * Zone 1. Exactly 48px, sticky, blurred white, one bottom border.
+ * Zone 1. Exactly 48px, sticky, flat white, one bottom border.
  *
  * It carries the title, the tab strip, the selected company pill, freshness, and
  * export. Nothing else - no charts, no descriptions.
+ *
+ * The tabs are underlined rather than a pill group. Navigation and controls should
+ * not look alike: a pill strip in the header reads as another metric picker, of
+ * which there are two inside the widgets below it. An underline says "you are
+ * here", and it is the only thing in the header that carries the accent hue.
  *
  * The access posture is shown here when the API reports the dashboard is open,
  * because "we left it public and forgot" is a state that has to be visible
@@ -56,10 +61,9 @@ export function Header({
         alignItems: "center",
         justifyContent: "space-between",
         gap: 16,
-        padding: "0 24px",
-        height: 48,
+        padding: "0 22px",
+        height: "var(--header-h)",
         background: "var(--header-bg)",
-        backdropFilter: "blur(8px)",
         borderBottom: "1px solid var(--border-solid)",
         flexShrink: 0,
       }}
@@ -67,8 +71,9 @@ export function Header({
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <h1
           style={{
-            fontSize: 15,
-            fontWeight: 700,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
             color: "var(--text-primary)",
             margin: 0,
             whiteSpace: "nowrap",
@@ -90,6 +95,7 @@ export function Header({
         value={tab}
         onChange={(v) => onTab(v as Tab)}
         ariaLabel="Dashboard view"
+        variant="underline"
       />
 
       <div
@@ -109,11 +115,11 @@ export function Header({
               display: "inline-flex",
               alignItems: "center",
               gap: 5,
-              padding: "2px 8px",
-              borderRadius: 99,
-              border: "1px solid #fde68a",
-              background: "#fffbeb",
-              color: "#92400e",
+              padding: "1px 7px",
+              borderRadius: 4,
+              border: "1px solid var(--warn-border)",
+              background: "var(--warn-bg)",
+              color: "var(--warn-text)",
               fontWeight: 600,
             }}
           >
@@ -137,16 +143,16 @@ export function Header({
         <a
           href={exportHref}
           style={{
-            height: 26,
+            height: "var(--control-h)",
             display: "inline-flex",
             alignItems: "center",
-            padding: "0 10px",
-            fontSize: 12,
+            padding: "0 9px",
+            fontSize: 11.5,
             fontWeight: 600,
             color: "var(--primary-text)",
             background: "var(--primary-light)",
             border: "1px solid var(--primary-border)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-control)",
             textDecoration: "none",
           }}
         >

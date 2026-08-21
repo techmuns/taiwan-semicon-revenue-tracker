@@ -11,13 +11,19 @@
  * Revenue and growth are two charts, not one chart with two y-axes. A dual axis
  * lets the author place the crossing point wherever the story needs it, which is
  * why it is the single most common way a chart lies.
+ *
+ * All three charts here follow the dashboard's shared graph/table mode; the control
+ * that sets it is in this tab's own selector row rather than repeated in three card
+ * headers, since one setting deserves one control.
  */
 
 import type { ReactNode } from "react";
 import { WidgetCard } from "./WidgetCard";
 import { MonthBars, MonthLines, SERIES_COLORS } from "./charts";
+import { SeriesTable } from "./tables";
 import { EmptyState } from "./states";
 import { StatusDot } from "./controls";
+import type { ViewMode } from "./controls";
 import { NA, monthLabel, pct, revenue, revenueExact, utcStamp } from "../format";
 import type { CompanyDetail } from "../types";
 
@@ -31,33 +37,34 @@ function str(v: unknown): string {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: "var(--text-hint)",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{children}</div>
+      <div className="eyebrow">{label}</div>
+      <div style={{ marginTop: 2, fontSize: 12.5, color: "var(--text-secondary)" }}>{children}</div>
     </div>
   );
 }
 
-export function CompanyPanel({ detail }: { detail: CompanyDetail }) {
+export function CompanyPanel({ detail, viz }: { detail: CompanyDetail; viz: ViewMode }) {
   const { company, series, raw_rows, restatements } = detail;
   const months = series.map((s) => s.month);
   const hasAny = series.some((s) => s.revenue_twd_thousands !== null);
+
+  // Declared once so the chart and the table cannot disagree about what they show.
+  const growth = [
+    { key: "yoy", label: "YoY", color: SERIES_COLORS[0], values: series.map((s) => s.yoy_pct) },
+    { key: "mom", label: "MoM", color: SERIES_COLORS[1], values: series.map((s) => s.mom_pct) },
+    {
+      key: "cum",
+      label: "YTD YoY",
+      color: SERIES_COLORS[2],
+      values: series.map((s) => s.cumulative_yoy_pct),
+    },
+  ];
 
   return (
     <>
       <WidgetCard
         title={`${company.display_name} · ${company.ticker}`}
         {...(company.name_zh ? { subtitle: company.name_zh } : {})}
-        category="sector"
         wide
       >
         <div
@@ -106,14 +113,30 @@ export function CompanyPanel({ detail }: { detail: CompanyDetail }) {
 
       <WidgetCard
         title="Monthly revenue"
-        subtitle="As filed, in NT$ · a hatched stub means no filing for that month"
-        category="markets"
+        subtitle="As filed, NT$ · a hatched stub means no filing"
       >
         {hasAny ? (
-          <MonthBars
-            data={series.map((s) => ({ month: s.month, value: s.revenue_twd_thousands }))}
-            format={revenue}
-          />
+          viz === "table" ? (
+            <SeriesTable
+              months={months}
+              series={[
+                {
+                  key: "rev",
+                  label: "Revenue",
+                  values: series.map((s) => s.revenue_twd_thousands),
+                  format: revenue,
+                  exact: revenueExact,
+                  color: "var(--seq-400)",
+                },
+              ]}
+              note="Hover a figure for the exact thousands as filed"
+            />
+          ) : (
+            <MonthBars
+              data={series.map((s) => ({ month: s.month, value: s.revenue_twd_thousands }))}
+              format={revenue}
+            />
+          )
         ) : (
           <EmptyState
             message="No revenue on file"
@@ -130,52 +153,53 @@ export function CompanyPanel({ detail }: { detail: CompanyDetail }) {
 
       <WidgetCard
         title="Growth rates"
-        subtitle="One axis, all in percent · a gap means the month has no comparable"
-        category="analytics"
+        subtitle="One axis, all in percent · a gap means no comparable"
       >
         {hasAny ? (
-          <MonthLines
-            months={months}
-            series={[
-              {
-                key: "yoy",
-                label: "YoY",
-                color: SERIES_COLORS[0],
-                values: series.map((s) => s.yoy_pct),
-              },
-              {
-                key: "mom",
-                label: "MoM",
-                color: SERIES_COLORS[1],
-                values: series.map((s) => s.mom_pct),
-              },
-              {
-                key: "cum",
-                label: "YTD YoY",
-                color: SERIES_COLORS[2],
-                values: series.map((s) => s.cumulative_yoy_pct),
-              },
-            ]}
-          />
+          viz === "table" ? (
+            <SeriesTable
+              months={months}
+              series={growth.map((g) => ({ ...g, format: (v) => pct(v, 1) }))}
+              unit="%"
+            />
+          ) : (
+            <MonthLines months={months} series={growth} />
+          )
         ) : (
           <EmptyState message="Nothing to chart" hint="Growth rates need at least one filing." />
         )}
       </WidgetCard>
 
       <WidgetCard
-        title="Year to date vs last year"
-        subtitle="Cumulative revenue, both years on the same axis · resets each January"
-        category="markets"
+        title="Year to date"
+        subtitle="Cumulative revenue as filed · resets each January"
       >
         {hasAny ? (
-          <MonthBars
-            data={series.map((s) => ({
-              month: s.month,
-              value: s.cumulative_ytd_revenue_twd_thousands,
-            }))}
-            format={revenue}
-            color="var(--seq-550)"
-          />
+          viz === "table" ? (
+            <SeriesTable
+              months={months}
+              series={[
+                {
+                  key: "ytd",
+                  label: "YTD revenue",
+                  values: series.map((s) => s.cumulative_ytd_revenue_twd_thousands),
+                  format: revenue,
+                  exact: revenueExact,
+                  color: "var(--seq-550)",
+                },
+              ]}
+              note="Resets to the January figure each year"
+            />
+          ) : (
+            <MonthBars
+              data={series.map((s) => ({
+                month: s.month,
+                value: s.cumulative_ytd_revenue_twd_thousands,
+              }))}
+              format={revenue}
+              color="var(--seq-550)"
+            />
+          )
         ) : (
           <EmptyState message="Nothing to chart" hint="Cumulative revenue needs a filing." />
         )}
@@ -183,8 +207,7 @@ export function CompanyPanel({ detail }: { detail: CompanyDetail }) {
 
       <WidgetCard
         title="As filed"
-        subtitle="The raw rows every derived number above comes from"
-        category="tools"
+        subtitle="The raw rows every number above is derived from"
         wide
         staticCard
         bodyStyle={{ overflow: "auto" }}
@@ -358,8 +381,7 @@ export function CompanyPanel({ detail }: { detail: CompanyDetail }) {
 
       <WidgetCard
         title="Restatements"
-        subtitle="Filings the exchange later revised · superseded rows are kept, never overwritten"
-        category="tools"
+        subtitle="Later-revised filings · superseded rows are kept, never overwritten"
         staticCard
       >
         {restatements.length === 0 ? (

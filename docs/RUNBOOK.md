@@ -263,10 +263,25 @@ Recorded so the divergence is traceable rather than looking like an oversight.
 | Host-owned auth | Auth is Cloudflare Access or a Worker-level shared key. There is no host to own it. |
 | "Registered datasources only" | The datasource is this project's own D1. |
 
-The skill's *visual* standards are followed as written: 3-zone shell, 48px
+The skill's *structural* standards are followed as written: 3-zone shell, 48px
 sticky header, `WidgetCard` for every data widget, `repeat(auto-fill,
-minmax(340px, 1fr))` at 20px gap, indigo `#4f46e5` chrome plus grayscale, and
-mandatory shimmer / empty / error states in every widget.
+minmax(340px, 1fr))`, indigo `#4f46e5` chrome plus grayscale, and mandatory
+shimmer / empty / error states in every widget.
+
+Its *decoration* is deliberately not followed. This dashboard is read for
+eight-digit revenue figures and signed percentage points, and every gradient,
+blur, and drop shadow competes with the marks for attention.
+
+| Skill says | This dashboard | Why |
+|---|---|---|
+| Gradient page, `rgba(255,255,255,0.9)` surfaces, `backdrop-filter: blur(8px)` | Flat opaque `#ffffff` cards on a flat `#f4f5f7` page, no blur anywhere | The page being gray is what makes a white card read as a plane. One value instead of three effects. |
+| `box-shadow` on cards; `translateY(-4px)` + 40px indigo shadow on hover | No card shadow; hover steps the border one shade darker | Nothing about a card is clickable, so the lift promised an affordance that does not exist — and on a ten-card screen, moving the pointer set off a wave of animation over the numbers being read. A shadow survives in exactly one place: the floating tooltip, where elevation is the point. |
+| 16px card radius | 10px (`--radius-card`), 6px on controls | |
+| Five pastel category badges in card headers | Deleted, along with the `category` prop | It put more saturated color in the chrome than the charts had in their data, against a taxonomy a single-purpose dashboard does not have. |
+| 15px title / 14px widget title / 14px body | 13px base, 13px title, 12.5px widget title | A denser instrument. |
+| Pill segmented control for tab navigation | Underlined tabs | Navigation and controls should not look alike; there are two real pill controls inside the widgets below. |
+| `all 0.35s` transitions | `0.14s`, border-color only | 350ms on chrome reads as a consumer app, not an instrument. |
+| One card per metric | Seven KPI cards → one "Summary" card; ten per-stage cards → one "Stage index" card | Both were facets of one thing wearing ten frames. Panels are divided by the grid's own 1px gaps showing the container color through — per-cell borders dangle at a wrapped row's end. |
 
 Charts are hand-rolled SVG rather than a library, because a library would take
 away the three things that matter most here: a null that **breaks** a line
@@ -277,9 +292,40 @@ two y-scales.
 The categorical palette was run through the dataviz validator before any chart
 code was written. It passes the lightness band, chroma floor, CVD separation
 (worst pair ΔE 9.2, deutan) and the normal-vision floor (ΔE 27.6). The third hue
-WARNs on contrast against the surface; that is not dismissable, so the relief is
-shipped — every series is direct-labelled at its last real point, and the Data
-tab carries the same numbers as a table.
+WARNs on contrast: **2.82:1** against the now-white chart surface (it was 2.74:1
+against the old `#f8f9fa`), under the 3:1 floor. That WARN is not dismissable, so
+the relief ships — every series is direct-labelled at its last real point, and
+every chart has a table view one click away.
+
+### Graph or table
+
+Every *chart* widget can be redrawn as a table of numbers. Two reasons, and only
+the first is aesthetic:
+
+1. It discharges the contrast WARN above with something better than a hope that
+   the reader can distinguish aqua from the surface.
+2. A figure that is going to be quoted should be **read**, not estimated off an
+   axis.
+
+Rules the implementation holds to:
+
+- **Graph is the default.** The URL carries `viz=table` only when the mode has
+  been changed; `viz=chart` is never written.
+- **One toggle per screen**, never one per card. Overview and Acceleration each
+  have a single chart widget, so it sits in that widget's header. The Company tab
+  has three, so it sits in that tab's own selector row. The Buckets tab's ten
+  stage panels are facets of one card, so it sits in that card's header — this is
+  the reason those ten cards were collapsed into one.
+- **Both views take the same data**, in the same shape, from the same fetch
+  (`MatrixTable` takes the `HeatRow[]` the `Heatmap` takes; `SeriesTable` takes
+  the aligned arrays the charts take). They cannot disagree.
+- **The Data and Quality tabs have no toggle** and this is not an omission. The
+  Data tab *is* the table view — column for column identical to the CSV export —
+  and drawing twelve columns of mixed units as one chart would need a dual axis.
+  The Quality tab holds coverage states and log rows, not series.
+- Table mode adds what a chart cannot show: the stage index table carries the
+  per-month **constant-membership count** as a second column, so a month that is
+  thin rather than weak is visible rather than inferred.
 
 ---
 

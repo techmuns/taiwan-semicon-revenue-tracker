@@ -15,7 +15,7 @@
  *
  * Series colors are the validated categorical slots in fixed order (blue,
  * orange, aqua) - assigned by identity, never by rank, so filtering a series out
- * never repaints the survivors. Aqua sits at 2.74:1 against the surface, under
+ * never repaints the survivors. Aqua sits at 2.82:1 against the white surface, under
  * the 3:1 guide, which obligates the relief the validator asks for: every series
  * is direct-labeled at its last point and the same numbers exist as a table on
  * the Data tab.
@@ -71,9 +71,9 @@ function Tooltip({ tip, width }: { tip: TipState; width: number }) {
         right: flip ? width - tip.x + 12 : undefined,
         top: Math.max(4, tip.y - 12),
         pointerEvents: "none",
-        background: "rgba(255,255,255,0.98)",
+        background: "var(--card-bg)",
         border: "1px solid var(--border-solid)",
-        borderRadius: 8,
+        borderRadius: "var(--radius-control)",
         boxShadow: "0 4px 12px rgba(0,0,0,0.10)",
         padding: "6px 9px",
         fontSize: 12,
@@ -254,8 +254,8 @@ export function MonthBars({
 
           <defs>
             <pattern id="absent-hatch" width="4" height="4" patternTransform="rotate(45)">
-              <rect width="4" height="4" fill="#ffffff" />
-              <line x1="0" y1="0" x2="0" y2="4" stroke="#e8e6e0" strokeWidth="1.5" />
+              <rect width="4" height="4" fill="var(--chart-surface)" />
+              <line x1="0" y1="0" x2="0" y2="4" stroke="var(--hatch-line)" strokeWidth="1.5" />
             </pattern>
           </defs>
         </svg>

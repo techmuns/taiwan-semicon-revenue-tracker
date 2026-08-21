@@ -4,53 +4,29 @@
  * There is deliberately no second visual shell in this dashboard: a widget is a
  * card, and a card looks like this. `wide` and `full` change how many grid
  * columns it spans, never how it looks.
+ *
+ * The colored category badge that used to sit in every header is gone. It carried
+ * five pastel hues - markets, analytics, heatmaps, sector, tools - which on a
+ * six-widget screen put more saturated color into the chrome than the charts had
+ * in their data. It also classified widgets against a taxonomy this dashboard does
+ * not have: every widget here is Taiwanese monthly revenue. The header now holds
+ * the title, the basis, and the controls that change what is shown, and nothing
+ * else.
  */
 
 import type { CSSProperties, ReactNode } from "react";
 
-export type Category = "markets" | "analytics" | "heatmaps" | "sector" | "tools";
-
-const CATEGORY_COLORS: Record<Category, { bg: string; text: string; border: string }> = {
-  markets: { bg: "#eff6ff", text: "#2563eb", border: "#dbeafe" },
-  analytics: { bg: "#f5f3ff", text: "#7c3aed", border: "#ede9fe" },
-  heatmaps: { bg: "#fff1f2", text: "#e11d48", border: "#fecdd3" },
-  sector: { bg: "#f0fdfa", text: "#0d9488", border: "#99f6e4" },
-  tools: { bg: "#f0fdf4", text: "#16a34a", border: "#bbf7d0" },
-};
-
-export function CategoryBadge({ category }: { category: Category }) {
-  const c = CATEGORY_COLORS[category];
-  return (
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        padding: "2px 8px",
-        borderRadius: 6,
-        border: `1px solid ${c.border}`,
-        background: c.bg,
-        color: c.text,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {category}
-    </span>
-  );
-}
-
 export interface WidgetCardProps {
   title: string;
+  /** One line stating the basis of the number - the weighting, the unit, the denominator. */
   subtitle?: string;
-  category?: Category;
-  /** Controls, shown in the header beside the badge. */
+  /** Controls that change what this widget shows. Right-aligned in the header. */
   actions?: ReactNode;
   /** Spans two grid columns where there is room - for matrices and wide tables. */
   wide?: boolean;
   /** Spans the whole grid row. */
   full?: boolean;
-  /** Suppresses the hover lift. Use for anything scrollable or cell-hoverable. */
+  /** Holds the border steady on hover. Use for anything scrollable or cell-hoverable. */
   staticCard?: boolean;
   /** Applied to the body, e.g. to let a matrix scroll horizontally. */
   bodyStyle?: CSSProperties;
@@ -60,7 +36,6 @@ export interface WidgetCardProps {
 export function WidgetCard({
   title,
   subtitle,
-  category,
   actions,
   wide,
   full,
@@ -82,34 +57,43 @@ export function WidgetCard({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          padding: "10px 16px",
+          minHeight: 38,
+          padding: "8px 12px",
           borderBottom: "1px solid var(--border)",
           background: "var(--card-header-bg)",
-          backdropFilter: "blur(8px)",
           flexShrink: 0,
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: 12.5,
+              fontWeight: 600,
+              letterSpacing: "-0.005em",
+              color: "var(--text-primary)",
+            }}
+          >
             {title}
           </h3>
           {subtitle && (
             <p
               style={{
-                margin: "2px 0 0",
+                margin: "1px 0 0",
                 fontSize: 11,
                 color: "var(--text-hint)",
-                lineHeight: 1.3,
+                lineHeight: 1.35,
               }}
             >
               {subtitle}
             </p>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {actions}
-          {category && <CategoryBadge category={category} />}
-        </div>
+        {actions && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {actions}
+          </div>
+        )}
       </div>
       <div
         style={{

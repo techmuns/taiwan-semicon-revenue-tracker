@@ -25,9 +25,11 @@ import type { Tab } from "./components/Header";
 import { FilterBar } from "./components/FilterBar";
 import { WidgetCard } from "./components/WidgetCard";
 import { AsyncBody, EmptyState, ErrorState, Shimmer, ShimmerBlock } from "./components/states";
-import { Segmented } from "./components/controls";
+import { Segmented, ViewToggle } from "./components/controls";
+import type { ViewMode } from "./components/controls";
 import { Heatmap } from "./components/Heatmap";
 import type { HeatRow } from "./components/Heatmap";
+import { MatrixTable } from "./components/tables";
 import { Kpis } from "./components/Kpis";
 import { Insights } from "./components/Insights";
 import { DataTable } from "./components/DataTable";
@@ -103,6 +105,8 @@ export default function App() {
     setView((v) => ({ ...v, filters, fromExplicit: true }));
   const setTab = (tab: Tab) => setView((v) => ({ ...v, tab }));
   const openCompany = (ticker: string) => setView((v) => ({ ...v, ticker, tab: "company" }));
+  // One graph/table mode for the whole dashboard. See ViewToggle for why it is shared.
+  const setViz = (viz: ViewMode) => setView((v) => ({ ...v, viz }));
 
   const showFilters = view.tab !== "quality" && view.tab !== "company";
 
@@ -126,7 +130,7 @@ export default function App() {
         now={now}
       />
 
-      <main style={{ flex: 1, overflow: "auto", padding: "24px 32px" }}>
+      <main style={{ flex: 1, overflow: "auto", padding: "var(--main-pad)" }}>
         {meta.error && !meta.data ? (
           <WidgetCard title="Dashboard unavailable">
             <AsyncBody state={meta} onRetry={meta.reload}>
@@ -154,8 +158,10 @@ export default function App() {
                 latestMonth={latestMonth}
                 metric={view.metric}
                 agg={view.agg}
+                viz={view.viz}
                 onMetric={(metric) => setView((v) => ({ ...v, metric }))}
                 onAgg={(agg) => setView((v) => ({ ...v, agg }))}
+                onViz={setViz}
                 onSelect={openCompany}
                 now={now}
               />
@@ -168,7 +174,9 @@ export default function App() {
                 months={months}
                 latestMonth={latestMonth}
                 metric={view.metric}
+                viz={view.viz}
                 onMetric={(metric) => setView((v) => ({ ...v, metric }))}
+                onViz={setViz}
                 onSelect={openCompany}
               />
             )}
@@ -177,6 +185,8 @@ export default function App() {
               <CompanyTab
                 meta={meta.data}
                 ticker={view.ticker}
+                viz={view.viz}
+                onViz={setViz}
                 onSelect={(ticker) => setView((v) => ({ ...v, ticker }))}
               />
             )}
@@ -184,17 +194,19 @@ export default function App() {
             {view.tab === "buckets" && (
               <div style={GRID}>
                 <AsyncBody state={analytics} onRetry={analytics.reload} skeleton={<ShimmerBlock />}>
-                  {() => <Buckets rows={rows} />}
+                  {() => <Buckets rows={rows} viz={view.viz} onViz={setViz} />}
                 </AsyncBody>
               </div>
             )}
 
+            {/* The Data tab gets no graph/table toggle: it IS the table view, column
+                for column identical to the CSV export, and drawing twelve columns of
+                mixed units as a chart would need a dual axis. */}
             {view.tab === "data" && (
               <div style={GRID}>
                 <WidgetCard
                   title="Monthly revenue table"
-                  subtitle="The twelve specified columns, in order · same shape as the CSV export"
-                  category="markets"
+                  subtitle="The twelve specified columns, in export order"
                   full
                   staticCard
                   bodyStyle={{ overflow: "hidden" }}
@@ -237,8 +249,10 @@ function OverviewTab({
   latestMonth,
   metric,
   agg,
+  viz,
   onMetric,
   onAgg,
+  onViz,
   onSelect,
   now,
 }: {
@@ -250,8 +264,10 @@ function OverviewTab({
   latestMonth: string | null;
   metric: HeatmapMetric;
   agg: "weighted" | "equal";
+  viz: ViewMode;
   onMetric: (m: HeatmapMetric) => void;
   onAgg: (a: "weighted" | "equal") => void;
+  onViz: (v: ViewMode) => void;
   onSelect: (ticker: string) => void;
   now: number;
 }) {
@@ -273,12 +289,9 @@ function OverviewTab({
       <div style={GRID}>
         <WidgetCard
           title="Supply chain by stage"
-          subtitle={`${spec.blurb} · ${
-            agg === "weighted"
-              ? "revenue-weighted, so the big names dominate their stage"
-              : "equal-weighted, so a small name counts as much as TSMC"
+          subtitle={`${spec.label} in ${spec.unit} · ${
+            agg === "weighted" ? "revenue-weighted" : "equal-weighted, one company one vote"
           }`}
-          category="heatmaps"
           full
           staticCard
           bodyStyle={{ overflow: "hidden" }}
@@ -292,13 +305,14 @@ function OverviewTab({
               />
               <Segmented
                 options={[
-                  { value: "weighted", label: "NT$ weighted", title: "Weight each company by revenue" },
+                  { value: "weighted", label: "NT$", title: "Weight each company by revenue" },
                   { value: "equal", label: "Equal", title: "One company, one vote" },
                 ]}
                 value={agg}
                 onChange={onAgg}
                 ariaLabel="Aggregation"
               />
+              <ViewToggle value={viz} onChange={onViz} />
             </>
           }
         >
@@ -315,15 +329,25 @@ function OverviewTab({
               ) : null
             }
           >
-            {(d) => (
-              <Heatmap
-                months={months}
-                rows={bucketRows(d)}
-                metric={metric}
-                rowHeader="Stage"
-                maxHeight={420}
-              />
-            )}
+            {(d) =>
+              viz === "table" ? (
+                <MatrixTable
+                  months={months}
+                  rows={bucketRows(d)}
+                  metric={metric}
+                  rowHeader="Stage"
+                  maxHeight={420}
+                />
+              ) : (
+                <Heatmap
+                  months={months}
+                  rows={bucketRows(d)}
+                  metric={metric}
+                  rowHeader="Stage"
+                  maxHeight={420}
+                />
+              )
+            }
           </AsyncBody>
         </WidgetCard>
 
@@ -373,7 +397,9 @@ function AccelerationTab({
   months,
   latestMonth,
   metric,
+  viz,
   onMetric,
+  onViz,
   onSelect,
 }: {
   filters: FilterState;
@@ -381,7 +407,9 @@ function AccelerationTab({
   months: string[];
   latestMonth: string | null;
   metric: HeatmapMetric;
+  viz: ViewMode;
   onMetric: (m: HeatmapMetric) => void;
+  onViz: (v: ViewMode) => void;
   onSelect: (ticker: string) => void;
 }) {
   const heat = useApi(() => api.tickerHeatmap(filters, metric), [JSON.stringify(filters), metric]);
@@ -391,18 +419,20 @@ function AccelerationTab({
     <div style={GRID}>
       <WidgetCard
         title="Company by month"
-        subtitle={`${spec.blurb} · sorted by the latest month, strongest first · click a row for the filings`}
-        category="heatmaps"
+        subtitle={`${spec.label} in ${spec.unit} · strongest latest month first · click a row for the filings`}
         full
         staticCard
         bodyStyle={{ overflow: "hidden" }}
         actions={
-          <Segmented
-            options={METRIC_OPTIONS}
-            value={metric}
-            onChange={onMetric}
-            ariaLabel="Heatmap metric"
-          />
+          <>
+            <Segmented
+              options={METRIC_OPTIONS}
+              value={metric}
+              onChange={onMetric}
+              ariaLabel="Heatmap metric"
+            />
+            <ViewToggle value={viz} onChange={onViz} />
+          </>
         }
       >
         <AsyncBody
@@ -418,16 +448,27 @@ function AccelerationTab({
             ) : null
           }
         >
-          {(d) => (
-            <Heatmap
-              months={months}
-              rows={tickerRows(d, latestMonth)}
-              metric={metric}
-              rowHeader="Company"
-              onRowClick={onSelect}
-              maxHeight={560}
-            />
-          )}
+          {(d) =>
+            viz === "table" ? (
+              <MatrixTable
+                months={months}
+                rows={tickerRows(d, latestMonth)}
+                metric={metric}
+                rowHeader="Company"
+                onRowClick={onSelect}
+                maxHeight={560}
+              />
+            ) : (
+              <Heatmap
+                months={months}
+                rows={tickerRows(d, latestMonth)}
+                metric={metric}
+                rowHeader="Company"
+                onRowClick={onSelect}
+                maxHeight={560}
+              />
+            )
+          }
         </AsyncBody>
       </WidgetCard>
 
@@ -477,10 +518,14 @@ function tickerRows(d: TickerHeatmap, latestMonth: string | null): HeatRow[] {
 function CompanyTab({
   meta,
   ticker,
+  viz,
+  onViz,
   onSelect,
 }: {
   meta: Meta | null;
   ticker: string | null;
+  viz: ViewMode;
+  onViz: (v: ViewMode) => void;
   onSelect: (ticker: string) => void;
 }) {
   const universe = meta?.universe ?? [];
@@ -493,34 +538,24 @@ function CompanyTab({
           display: "flex",
           alignItems: "center",
           gap: 10,
-          padding: "10px 14px",
-          marginBottom: 20,
+          padding: "8px 12px",
+          marginBottom: "var(--grid-gap)",
           background: "var(--card-bg)",
           border: "1px solid var(--border)",
-          borderRadius: 12,
+          borderRadius: "var(--radius-card)",
         }}
       >
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-            color: "var(--text-hint)",
-          }}
-        >
-          Company
-        </span>
+        <span className="eyebrow">Company</span>
         <select
           value={ticker ?? ""}
           onChange={(e) => onSelect(e.target.value)}
           style={{
-            height: 28,
-            padding: "0 8px",
-            fontSize: 12,
-            background: "#ffffff",
+            height: "var(--control-h)",
+            padding: "0 7px",
+            fontSize: 11.5,
+            background: "var(--card-bg)",
             border: "1px solid var(--border-solid)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-control)",
             minWidth: 280,
             cursor: "pointer",
           }}
@@ -537,16 +572,19 @@ function CompanyTab({
             </optgroup>
           ))}
         </select>
-        <span style={{ fontSize: 11, color: "var(--text-hint)" }}>
+        <span style={{ flex: 1, fontSize: 11, color: "var(--text-hint)" }}>
           Full history, unaffected by the month filters on the other tabs
         </span>
+        {/* One toggle for this tab's three charts, in the tab's own control row -
+            three identical controls in three card headers would be noise. */}
+        <ViewToggle value={viz} onChange={onViz} />
       </div>
 
       <div style={GRID}>
         {ticker ? (
-          <CompanyBody ticker={ticker} />
+          <CompanyBody ticker={ticker} viz={viz} />
         ) : (
-          <WidgetCard title="No company selected" category="sector">
+          <WidgetCard title="No company selected">
             <EmptyState
               message="Pick a company above"
               hint="Or click any row in the Acceleration heatmap or the Data table."
@@ -559,7 +597,7 @@ function CompanyTab({
 }
 
 /** Split out so the query is keyed to the ticker and remounts cleanly. */
-function CompanyBody({ ticker }: { ticker: string }) {
+function CompanyBody({ ticker, viz }: { ticker: string; viz: ViewMode }) {
   const detail = useApi(() => api.company(ticker), [ticker]);
 
   if (detail.error && !detail.data) {
@@ -576,7 +614,7 @@ function CompanyBody({ ticker }: { ticker: string }) {
       </WidgetCard>
     );
   }
-  return <CompanyPanel detail={detail.data} />;
+  return <CompanyPanel detail={detail.data} viz={viz} />;
 }
 
 // ------------------------------------------------------------------- quality --

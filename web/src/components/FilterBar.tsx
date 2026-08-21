@@ -38,13 +38,12 @@ export function FilterBar({
         display: "flex",
         alignItems: "center",
         flexWrap: "wrap",
-        gap: 16,
-        padding: "10px 14px",
-        marginBottom: 20,
+        gap: 14,
+        padding: "8px 12px",
+        marginBottom: "var(--grid-gap)",
         background: "var(--card-bg)",
         border: "1px solid var(--border)",
-        borderRadius: 12,
-        backdropFilter: "blur(8px)",
+        borderRadius: "var(--radius-card)",
       }}
     >
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>

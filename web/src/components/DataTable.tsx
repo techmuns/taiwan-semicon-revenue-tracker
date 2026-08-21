@@ -193,7 +193,7 @@ export function DataTable({
                       position: "sticky",
                       top: 0,
                       zIndex: 2,
-                      background: "#ffffff",
+                      background: "var(--card-bg)",
                       textAlign: c.align,
                       padding: "7px 10px",
                       fontSize: 10,

@@ -9,30 +9,18 @@ import type { CSSProperties, ReactNode } from "react";
 import { monthLabel } from "../format";
 
 const CONTROL: CSSProperties = {
-  height: 28,
-  padding: "0 8px",
-  fontSize: 12,
+  height: "var(--control-h)",
+  padding: "0 7px",
+  fontSize: 11.5,
   color: "var(--text-secondary)",
-  background: "#ffffff",
+  background: "var(--card-bg)",
   border: "1px solid var(--border-solid)",
-  borderRadius: 8,
+  borderRadius: "var(--radius-control)",
   cursor: "pointer",
 };
 
 export function Label({ children }: { children: ReactNode }) {
-  return (
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.04em",
-        color: "var(--text-hint)",
-      }}
-    >
-      {children}
-    </span>
-  );
+  return <span className="eyebrow">{children}</span>;
 }
 
 export function Button({
@@ -59,7 +47,7 @@ export function Button({
         fontWeight: 600,
         opacity: disabled ? 0.5 : 1,
         color: active ? "var(--primary-text)" : "var(--text-secondary)",
-        background: active ? "var(--primary-light)" : "#ffffff",
+        background: active ? "var(--primary-light)" : "var(--card-bg)",
         borderColor: active ? "var(--primary-border)" : "var(--border-solid)",
       }}
     >
@@ -68,29 +56,84 @@ export function Button({
   );
 }
 
-/** Segmented control - tabs, and metric pickers. Exactly one option is selected. */
+/**
+ * Segmented control - view toggles, metric pickers, and the header's tab strip.
+ * Exactly one option is selected.
+ *
+ * Two variants, because the two jobs read differently at a glance. `pill` is a
+ * control that sets a parameter of the widget it sits in. `underline` is
+ * navigation: it says which page you are on, and a pill in the header competes
+ * with the pills inside the widgets for the same meaning.
+ */
 export function Segmented<T extends string>({
   options,
   value,
   onChange,
   ariaLabel,
+  variant = "pill",
 }: {
   options: readonly { value: T; label: string; title?: string }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
+  variant?: "pill" | "underline";
 }) {
+  if (variant === "underline") {
+    return (
+      <div
+        role="tablist"
+        aria-label={ariaLabel}
+        style={{
+          display: "inline-flex",
+          alignSelf: "stretch",
+          gap: 2,
+          // The 2px underline overlaps the header's own 1px bottom border, so the
+          // selected tab reads as attached to the content rather than floating.
+          marginBottom: -1,
+        }}
+      >
+        {options.map((o) => {
+          const on = o.value === value;
+          return (
+            <button
+              key={o.value}
+              role="tab"
+              aria-selected={on}
+              type="button"
+              title={o.title}
+              onClick={() => onChange(o.value)}
+              style={{
+                padding: "0 10px",
+                fontSize: 12,
+                fontWeight: on ? 600 : 500,
+                border: "none",
+                borderBottom: `2px solid ${on ? "var(--primary)" : "transparent"}`,
+                background: "transparent",
+                color: on ? "var(--text-primary)" : "var(--text-muted)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "var(--ease)",
+              }}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
       style={{
         display: "inline-flex",
-        padding: 2,
-        gap: 2,
-        background: "#f3f4f6",
+        padding: 1,
+        gap: 1,
+        background: "var(--track)",
         border: "1px solid var(--border-solid)",
-        borderRadius: 9,
+        borderRadius: "var(--radius-control)",
       }}
     >
       {options.map((o) => {
@@ -104,16 +147,16 @@ export function Segmented<T extends string>({
             title={o.title}
             onClick={() => onChange(o.value)}
             style={{
-              height: 24,
-              padding: "0 10px",
-              fontSize: 12,
-              fontWeight: 600,
+              height: 22,
+              padding: "0 9px",
+              fontSize: 11.5,
+              fontWeight: on ? 600 : 500,
               border: "none",
-              borderRadius: 7,
+              borderRadius: 4,
               cursor: "pointer",
-              color: on ? "var(--primary-text)" : "var(--text-muted)",
-              background: on ? "#ffffff" : "transparent",
-              boxShadow: on ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+              whiteSpace: "nowrap",
+              color: on ? "var(--text-primary)" : "var(--text-muted)",
+              background: on ? "var(--card-bg)" : "transparent",
               transition: "var(--ease)",
             }}
           >
@@ -122,6 +165,58 @@ export function Segmented<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * How a widget that has both draws itself: as a graph, or as a table of numbers.
+ *
+ * Graph is the default everywhere. A chart answers "what is the shape" in one
+ * glance, which is the question this dashboard exists for - which stage is
+ * inflecting, and in what order. The table answers the second question, "what
+ * exactly is the number", and it has to stay one click away for two independent
+ * reasons: the aqua series color sits at 2.8:1 against the card surface, under the
+ * 3:1 guide, and the relief the palette validator asks for is direct labels plus a
+ * table view; and a figure that is going to be quoted should be read as a figure,
+ * not estimated off an axis.
+ */
+export type ViewMode = "chart" | "table";
+
+/**
+ * One mode for the whole dashboard, not one per card.
+ *
+ * The control is drawn in the header of each widget that has both forms - which is
+ * where you are looking when you want to switch - but it sets a single shared
+ * value that lives in the URL. So a link carries the reader's choice, and a screen
+ * is never half graphs and half tables, which is the state that makes two widgets
+ * side by side impossible to compare. The title text says so, because a control
+ * with effects outside its own card has to admit it.
+ */
+export function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (v: ViewMode) => void;
+}) {
+  return (
+    <Segmented
+      options={[
+        {
+          value: "chart" as ViewMode,
+          label: "Graph",
+          title: "Draw every chart on this dashboard as a graph",
+        },
+        {
+          value: "table" as ViewMode,
+          label: "Table",
+          title: "Draw every chart on this dashboard as a table of numbers",
+        },
+      ]}
+      value={value}
+      onChange={onChange}
+      ariaLabel="Draw as a graph or a table"
+    />
   );
 }
 
@@ -180,15 +275,17 @@ export function ChipSet({
             aria-pressed={on}
             onClick={() => onToggle(o.value)}
             style={{
-              height: 24,
-              padding: "0 9px",
+              height: 22,
+              padding: "0 8px",
               fontSize: 11,
-              fontWeight: 600,
-              borderRadius: 99,
+              fontWeight: on ? 600 : 500,
+              borderRadius: 4,
               cursor: "pointer",
+              whiteSpace: "nowrap",
               color: on ? "var(--primary-text)" : "var(--text-muted)",
-              background: on ? "var(--primary-light)" : "#ffffff",
+              background: on ? "var(--primary-light)" : "var(--card-bg)",
               border: `1px solid ${on ? "var(--primary-border)" : "var(--border-solid)"}`,
+              transition: "var(--ease)",
             }}
           >
             {o.label}
@@ -200,7 +297,7 @@ export function ChipSet({
           type="button"
           onClick={onClear}
           style={{
-            height: 24,
+            height: 22,
             padding: "0 6px",
             fontSize: 11,
             border: "none",
@@ -214,7 +311,7 @@ export function ChipSet({
         </button>
       ) : (
         <span style={{ fontSize: 11, color: "var(--text-hint)" }}>
-          {selected.length === 0 ? `none selected = ${emptyMeans}` : ""}
+          {selected.length === 0 ? `all ${emptyMeans}` : ""}
         </span>
       )}
     </div>
@@ -239,7 +336,7 @@ export function Toggle({
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
-        fontSize: 12,
+        fontSize: 11.5,
         color: "var(--text-secondary)",
         cursor: "pointer",
       }}
@@ -248,7 +345,7 @@ export function Toggle({
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        style={{ accentColor: "var(--primary)", width: 14, height: 14, cursor: "pointer" }}
+        style={{ accentColor: "var(--primary)", width: 13, height: 13, cursor: "pointer" }}
       />
       {label}
     </label>
@@ -270,33 +367,30 @@ export function TickerPill({
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
-        padding: "2px 10px",
+        gap: 5,
+        padding: "1px 4px 1px 8px",
         background: "var(--primary-light)",
         color: "var(--primary-text)",
-        borderRadius: 99,
-        fontSize: 12,
+        borderRadius: 4,
+        fontSize: 11.5,
         fontWeight: 600,
         border: "1px solid var(--primary-border)",
       }}
     >
-      <span
-        style={{ width: 6, height: 6, background: "#6366f1", borderRadius: "50%" }}
-        aria-hidden="true"
-      />
       {ticker}
-      {company && <span style={{ color: "#818cf8", fontWeight: 400 }}>· {company}</span>}
+      {company && <span style={{ fontWeight: 400 }}>{company}</span>}
       {onClear && (
         <button
           type="button"
           onClick={onClear}
           aria-label="Clear selected company"
+          title="Clear selected company"
           style={{
             border: "none",
             background: "transparent",
             color: "var(--primary-text)",
             cursor: "pointer",
-            padding: 0,
+            padding: "0 3px",
             fontSize: 13,
             lineHeight: 1,
           }}
@@ -321,7 +415,7 @@ export function StatusDot({
     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11 }}>
       <span
         aria-hidden="true"
-        style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }}
+        style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }}
       />
       <span style={{ color: "var(--text-secondary)" }}>{children}</span>
     </span>

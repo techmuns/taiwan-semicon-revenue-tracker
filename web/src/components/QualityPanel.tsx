@@ -46,12 +46,20 @@ export function QualityPanel({ quality }: { quality: Quality }) {
 
   return (
     <>
-      <WidgetCard title="Coverage" subtitle="Company-months with a filing on record" category="tools">
-        <div style={{ padding: "14px 16px 12px" }}>
-          <div className="tnum" style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.15 }}>
+      <WidgetCard title="Coverage" subtitle="Company-months with a filing on record">
+        <div style={{ padding: "11px 12px 12px" }}>
+          <div
+            className="tnum"
+            style={{
+              fontSize: 19,
+              fontWeight: 600,
+              lineHeight: 1.2,
+              letterSpacing: "-0.015em",
+            }}
+          >
             {coverage.trackable_pct === null ? "—" : `${coverage.trackable_pct.toFixed(1)}%`}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-hint)", marginTop: 4 }}>
+          <div style={{ fontSize: 10.5, color: "var(--text-hint)", marginTop: 3 }}>
             {coverage.trackable_with_data.toLocaleString("en-US")} of{" "}
             {coverage.trackable_cells.toLocaleString("en-US")} cells that were expected to have a
             filing
@@ -87,7 +95,6 @@ export function QualityPanel({ quality }: { quality: Quality }) {
       <WidgetCard
         title="Findings"
         subtitle="Automated checks, most severe first"
-        category="tools"
         staticCard
       >
         {findings.length === 0 ? (
@@ -104,11 +111,14 @@ export function QualityPanel({ quality }: { quality: Quality }) {
                 <div key={sev}>
                   <div
                     style={{
-                      padding: "6px 14px",
-                      background: "rgba(255,255,255,0.7)",
+                      padding: "5px 12px",
+                      // Opaque: rows scrolling under a translucent sticky bar read as
+                      // two overlapping lines of text.
+                      background: "var(--card-bg)",
                       borderBottom: "1px solid var(--border)",
                       position: "sticky",
                       top: 0,
+                      zIndex: 1,
                     }}
                   >
                     <StatusDot level={SEVERITY_LEVEL[sev] ?? "warning"}>
@@ -143,7 +153,6 @@ export function QualityPanel({ quality }: { quality: Quality }) {
       <WidgetCard
         title="Interior gaps"
         subtitle="A month with no filing between two months that have one"
-        category="tools"
         staticCard
       >
         {interior_gaps.length === 0 ? (
@@ -179,8 +188,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
 
       <WidgetCard
         title="Coverage matrix"
-        subtitle="Filed · not filed · no filing obligation — three states, deliberately not two"
-        category="heatmaps"
+        subtitle="Filed · not filed · no obligation — three states, not two"
         wide
         staticCard
         bodyStyle={{ overflow: "hidden" }}
@@ -281,7 +289,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
                         ? "var(--seq-250)"
                         : expected
                           ? "var(--error-bg)"
-                          : "#f3f4f6";
+                          : "var(--track)";
                       const label = filed
                         ? `filed · ${cell?.source_id ?? "unknown source"}`
                         : expected
@@ -296,7 +304,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
                             border: "1px solid var(--chart-surface)",
                             height: 20,
                             textAlign: "center",
-                            color: filed ? "#1c3a5e" : expected ? "var(--error-red)" : "#9ca3af",
+                            color: filed ? "var(--ink-on-seq)" : expected ? "var(--error-red)" : "var(--text-hint)",
                             fontSize: 10,
                           }}
                         >
@@ -324,7 +332,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
           {[
             { bg: "var(--seq-250)", label: "filed" },
             { bg: "var(--error-bg)", label: "not filed — expected a row", mark: "!" },
-            { bg: "#f3f4f6", label: "no filing obligation", mark: "·" },
+            { bg: "var(--track)", label: "no filing obligation", mark: "·" },
           ].map((l) => (
             <span key={l.label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               <span
@@ -333,7 +341,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
                   height: 14,
                   borderRadius: 3,
                   background: l.bg,
-                  border: "1px solid rgba(0,0,0,0.06)",
+                  border: "1px solid var(--border-solid)",
                   fontSize: 9,
                   textAlign: "center",
                   lineHeight: "13px",
@@ -350,8 +358,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
 
       <WidgetCard
         title="Cross-source agreement"
-        subtitle="Company-months carried by more than one feed — the same filing seen twice"
-        category="tools"
+        subtitle="Company-months carried by two or more feeds"
         staticCard
       >
         {multi_source_cells.length === 0 ? (
@@ -396,8 +403,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
 
       <WidgetCard
         title="Fetch log"
-        subtitle="Every upstream request, with byte-level provenance behind it"
-        category="tools"
+        subtitle="Every upstream request, by source and month"
         wide
         staticCard
         bodyStyle={{ overflow: "auto" }}

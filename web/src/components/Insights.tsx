@@ -120,16 +120,14 @@ export function Insights({
     <>
       <WidgetCard
         title="Accelerating"
-        subtitle="Biggest increase in the YoY rate vs last month · sparkline is the YoY path"
-        category="analytics"
+        subtitle="Biggest increase in the YoY rate · sparkline is the YoY path"
         staticCard
       >
         <MoverList rows={rows} latestRows={latestRows} direction="top" onSelect={onSelect} />
       </WidgetCard>
       <WidgetCard
         title="Decelerating"
-        subtitle="Biggest decrease in the YoY rate · a high grower can still be here"
-        category="analytics"
+        subtitle="Biggest decrease in the YoY rate"
         staticCard
       >
         <MoverList rows={rows} latestRows={latestRows} direction="bottom" onSelect={onSelect} />

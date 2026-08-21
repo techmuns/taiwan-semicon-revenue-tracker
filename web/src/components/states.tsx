@@ -218,7 +218,7 @@ export function AsyncBody<T>({
             fontWeight: 600,
             color: "var(--error-red)",
             background: "var(--error-bg)",
-            border: "1px solid #fecaca",
+            border: "1px solid var(--error-border)",
             borderRadius: 6,
             padding: "2px 8px",
           }}
