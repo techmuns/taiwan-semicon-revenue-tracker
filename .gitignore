@@ -1,0 +1,25 @@
+# Node / Wrangler
+node_modules/
+.wrangler/
+dist/
+.dev.vars
+*.log
+
+# Python ingest
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local data: fetched bytes and generated SQL are reproducible, not source
+ingest/cache/
+ingest/out/
+*.sqlite
+*.sqlite3
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

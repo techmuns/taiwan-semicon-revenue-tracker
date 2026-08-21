@@ -1,0 +1,18 @@
+name = "taiwan-semicon-revenue"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# Structured logs + traces in the dashboard. Cheap, and the monthly cron is
+# exactly the kind of thing you only debug after the fact.
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "taiwan-semicon-revenue"
+database_id = "da985a76-0e1a-4100-abd4-48c21687c290"
+
+# Cron triggers are intentionally NOT configured yet - there is no scheduled()
+# handler to run. Added in the refresh phase:
+#   [triggers]
+#   crons = ["0 1 11,14,18 * *"]   # UTC; TW filing deadline is the 10th
