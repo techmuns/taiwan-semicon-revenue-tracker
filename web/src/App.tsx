@@ -171,7 +171,6 @@ export default function App() {
               <OverviewTab
                 meta={meta.data}
                 filters={view.filters}
-                analytics={analytics}
                 rows={rows}
                 months={months}
                 latestMonth={latestMonth}
@@ -210,12 +209,29 @@ export default function App() {
               />
             )}
 
+            {/* The grid goes INSIDE the AsyncBody callback, not around it.
+                AsyncBody renders one <div>, so as a direct child of GRID it
+                became a single `minmax(340px, 1fr)` cell and everything it
+                wrapped was trapped in one 340px column - with three quarters of
+                the screen left empty. Worse, WidgetCard's `wide`/`full` set
+                `gridColumn`, which only does anything for a DIRECT grid child,
+                so the cards that asked to span were silently ignored. */}
             {view.tab === "buckets" && (
-              <div style={GRID}>
-                <AsyncBody state={analytics} onRetry={analytics.reload} skeleton={<ShimmerBlock />}>
-                  {() => <Buckets rows={rows} viz={view.viz} onViz={setViz} />}
-                </AsyncBody>
-              </div>
+              <AsyncBody
+                state={analytics}
+                onRetry={analytics.reload}
+                skeleton={
+                  <div style={GRID}>
+                    <ShimmerBlock />
+                  </div>
+                }
+              >
+                {() => (
+                  <div style={GRID}>
+                    <Buckets rows={rows} viz={view.viz} onViz={setViz} />
+                  </div>
+                )}
+              </AsyncBody>
             )}
 
             {/* The Data tab gets no graph/table toggle: it IS the table view, column
@@ -262,7 +278,6 @@ export default function App() {
 function OverviewTab({
   meta,
   filters,
-  analytics,
   rows,
   months,
   latestMonth,
@@ -277,7 +292,6 @@ function OverviewTab({
 }: {
   meta: Meta | null;
   filters: FilterState;
-  analytics: { data: { rows: AnalyticsRow[] } | null; error: unknown; loading: boolean };
   rows: AnalyticsRow[];
   months: string[];
   latestMonth: string | null;
@@ -374,9 +388,12 @@ function OverviewTab({
           </AsyncBody>
         </WidgetCard>
 
-        <AsyncBody state={analytics} skeleton={<ShimmerBlock height={200} />}>
-          {() => <Insights rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />}
-        </AsyncBody>
+        {/* Rendered bare, exactly as the Acceleration tab does it. Insights emits
+            TWO cards, so wrapping it in AsyncBody made both share one grid cell
+            and stacked Decelerating underneath Accelerating in a 340px column.
+            `rows` is already the resolved analytics payload and both panels
+            handle an empty list, so the wrapper bought nothing. */}
+        <Insights rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />
 
         {meta && <Sources meta={meta} now={now} />}
       </div>
@@ -650,10 +667,23 @@ function CompanyBody({ ticker, viz }: { ticker: string; viz: ViewMode }) {
 function QualityTab() {
   const quality = useApi(() => api.quality(), []);
   return (
-    <div style={GRID}>
-      <AsyncBody state={quality} onRetry={quality.reload} skeleton={<ShimmerBlock height={240} />}>
-        {(q) => <QualityPanel quality={q} />}
-      </AsyncBody>
-    </div>
+    // Grid inside the callback - see the Buckets tab for why. QualityPanel emits
+    // six cards, two of which ask to span two columns; nesting them one level
+    // deeper stacked all six in a single 340px column and dropped the spans.
+    <AsyncBody
+      state={quality}
+      onRetry={quality.reload}
+      skeleton={
+        <div style={GRID}>
+          <ShimmerBlock height={240} />
+        </div>
+      }
+    >
+      {(q) => (
+        <div style={GRID}>
+          <QualityPanel quality={q} />
+        </div>
+      )}
+    </AsyncBody>
   );
 }
