@@ -220,8 +220,56 @@ integer 2330 and stops matching anything.
 
 ```bash
 cd web    && npm ci && npm run build      # -> worker/public
+cd worker && npx wrangler login           # pick the account below
 cd worker && npx wrangler deploy
 ```
+
+### Which account, and why it is pinned
+
+The live service is in the account behind `taiwan-semicon-revenue.tech-441.workers.dev`:
+
+```
+a441977d2344922f96303859b74754d8
+```
+
+`wrangler.toml` pins that as `account_id`. Before it did, the target came from
+whatever `CLOUDFLARE_ACCOUNT_ID` / `CF_ACCOUNT_ID` was in the shell, and a shell
+holding another account's token did **not** fail — `wrangler deployments list`
+returned `This Worker does not exist on your account [code: 10007]`, which means
+`deploy` would have *created* a second Worker of the same name at a different
+`*.workers.dev` hostname, bound to a `database_id` that account cannot read. The
+deploy reports success; the real dashboard goes on serving stale code. Pinned,
+the same wrong token now fails loudly with `Authentication error [code: 10000]`.
+
+An account ID is not a secret — it is in every dashboard URL, which is where to
+find it: `https://dash.cloudflare.com/<account-id>/home`. The API token is the
+secret, and belongs in the environment or `wrangler secret`, never in the repo.
+
+Confirm you are in the right account **before** deploying. This must list the
+existing Worker rather than erroring:
+
+```bash
+npx wrangler deployments list --cwd worker
+```
+
+Then confirm the deploy actually landed — `/api/*` is cached for five minutes,
+so use curl rather than the browser:
+
+```bash
+B=https://taiwan-semicon-revenue.tech-441.workers.dev
+curl -s -o /dev/null -w 'invalid filter -> %{http_code} (want 400)\n' "$B/api/analytics?tickers=2330.TW&from=2026-07"
+curl -s -o /dev/null -w 'unknown ticker -> %{http_code} (want 404)\n' "$B/api/company/2338"
+```
+
+`npx wrangler rollback` reverts to the previous version if anything looks wrong.
+
+### The cron error on every deploy is expected
+
+The deploy prints `This account has reached the Workers Free limit of 5 cron
+triggers per account`. That is the [open item](#there-is-no-monthly-auto-refresh),
+not a failed deploy — wrangler says so itself: "Trigger configuration … was only
+partially updated". The Worker, its bindings and the assets all land. Do not
+retry on account of it.
 
 `web/` builds directly into `worker/public`, which the `[assets]` binding
 serves, so the SPA and the API share one origin — no CORS, no second host to

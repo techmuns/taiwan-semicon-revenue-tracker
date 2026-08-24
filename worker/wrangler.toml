@@ -2,6 +2,27 @@ name = "taiwan-semicon-revenue"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
+# WHICH ACCOUNT THIS DEPLOYS TO, STATED RATHER THAN INHERITED.
+#
+# Without this line the target account comes from whatever CLOUDFLARE_ACCOUNT_ID
+# (or the deprecated CF_ACCOUNT_ID) happens to be in the shell - so a machine
+# holding credentials for a different account would not fail. It would succeed,
+# creating a SECOND Worker of the same name at a different *.workers.dev
+# hostname, bound to a database_id that account cannot read. The live dashboard
+# would go on serving stale code while the deploy reported success.
+#
+# That is not hypothetical: a session with a token for an unrelated account got
+# as far as the deploy step before `wrangler deployments list` returned
+#   ✘ This Worker does not exist on your account. [code: 10007]
+# which is exactly the check this line makes unnecessary. Pinned, a wrong-account
+# deploy fails loudly on an authentication error instead of quietly succeeding.
+#
+# This is the account behind taiwan-semicon-revenue.tech-441.workers.dev. An
+# account ID is not a secret - it is in every dashboard URL - so it belongs in
+# version control, unlike the API token, which belongs in `wrangler secret` or
+# the environment.
+account_id = "a441977d2344922f96303859b74754d8"
+
 # Structured logs + traces in the dashboard. Cheap, and the monthly cron is
 # exactly the kind of thing you only debug after the fact.
 [observability]
