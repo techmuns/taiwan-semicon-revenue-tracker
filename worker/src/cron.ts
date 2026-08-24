@@ -806,6 +806,14 @@ async function writeFindings(
       ).bind(month),
     );
   }
+  // Whole-run findings - NOT_SEEDED, every feed failing, MULTI_MONTH_RUN - carry
+  // no month, and `month = ?` never matches NULL, so before this they accumulated
+  // forever: one row per failed run, still shown as current long after the run
+  // that recovered. They belong to the run rather than to a month, so the newest
+  // run's verdict replaces the previous one exactly as it does per month.
+  statements.push(
+    env.DB.prepare(`DELETE FROM quality_findings WHERE run_id LIKE 'cron-%' AND month IS NULL`),
+  );
   const insert = env.DB.prepare(
     `INSERT INTO quality_findings
        (run_id, created_at_utc, severity, code, month, ticker, source_id, message)

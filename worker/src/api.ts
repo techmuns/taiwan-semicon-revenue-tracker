@@ -53,17 +53,41 @@ const HEATMAP_METRICS = new Set([
 export async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
   const url = new URL(request.url);
 
-  if (path === "/api/health") return json(await health(env));
-  if (path === "/api/meta") return json(await meta(env));
-  if (path === "/api/analytics") return json(await analytics(env, url));
-  if (path === "/api/heatmap") return json(await heatmap(env, url));
-  if (path === "/api/quality") return json(await quality(env));
-  if (path === "/api/export.csv") return exportCsv(env, url);
+  try {
+    if (path === "/api/health") {
+      // An unhealthy answer must not be a 200, and must never be cached: a
+      // monitor that only reads the status code would otherwise see green on an
+      // empty database, and json() stamps every 200 as public max-age=300, so
+      // the green would then be replayed for five minutes after a real recovery.
+      const body = await health(env);
+      return json(body, body.ok ? 200 : 503);
+    }
+    if (path === "/api/meta") return json(await meta(env));
+    if (path === "/api/analytics") return json(await analytics(env, url));
+    if (path === "/api/heatmap") {
+      const body = await heatmap(env, url);
+      return json(body, "error" in body ? 400 : 200);
+    }
+    if (path === "/api/quality") return json(await quality(env));
+    if (path === "/api/export.csv") return exportCsv(env, url);
 
-  const company = path.match(/^\/api\/company\/([^/]+)$/);
-  if (company) return json(await companyDetail(env, decodeURIComponent(company[1])));
+    const company = path.match(/^\/api\/company\/([^/]+)$/);
+    if (company) {
+      const body = await companyDetail(env, decodeURIComponent(company[1]));
+      // Distinguish "you asked for a ticker that is not a ticker" from "that
+      // ticker is not in this universe" - a 200 for either meant the dashboard
+      // cached a not-found for five minutes and rendered it as an empty company.
+      const notFound = "error" in body && String(body.error).startsWith("unknown ticker");
+      return json(body, "error" in body ? (notFound ? 404 : 400) : 200);
+    }
 
-  return json({ error: "not found", path }, 404);
+    return json({ error: "not found", path }, 404);
+  } catch (err) {
+    if (err instanceof BadFilterError) {
+      return json({ error: "invalid filter", ...err.detail }, 400);
+    }
+    throw err;
+  }
 }
 
 // ------------------------------------------------------------------ /health --
@@ -107,7 +131,13 @@ async function meta(env: Env) {
          FROM raw_revenue GROUP BY source_id ORDER BY source_id`,
     ),
     env.DB.prepare(
-      `SELECT month, COUNT(*) AS tickers_with_data, MAX(last_seen_utc) AS last_seen_utc
+      // COUNT(DISTINCT ticker), not COUNT(*): raw_revenue is keyed
+      // (source_id, month, ticker), so a month held by two feeds counted every
+      // company once per feed. Today every 2026-07 row is mops_company so the
+      // figure looks right, but the first cron run that writes _L (31) and _O
+      // (5) alongside would have reported 72 of 36 names filed.
+      `SELECT month, COUNT(DISTINCT ticker) AS tickers_with_data,
+              MAX(last_seen_utc) AS last_seen_utc
          FROM raw_revenue WHERE revenue_month IS NOT NULL
         GROUP BY month ORDER BY month_idx`,
     ),
@@ -154,16 +184,72 @@ interface Filters {
   onlyWithData: boolean;
 }
 
+/**
+ * Thrown when a filter parameter was supplied but nothing in it survived
+ * validation. See readFilters.
+ */
+export class BadFilterError extends Error {
+  constructor(readonly detail: { parameter: string; supplied: string; expected: string }) {
+    super(`invalid ${detail.parameter}: ${detail.supplied}`);
+    this.name = "BadFilterError";
+  }
+}
+
+/**
+ * Parse the filter parameters, REJECTING rather than silently discarding.
+ *
+ * Dropping an invalid value used to widen the answer instead of narrowing it:
+ * whereFor only emits an IN clause for a non-empty list, so a filter that
+ * validated to nothing became no filter at all. Live, before this change,
+ * `?tickers=2330.TW` (a plausible pasted Yahoo symbol) returned all 37 names
+ * rather than one, and `?tiers=3` did the same - the caller asked for a subset
+ * and was handed the universe with a 200 and no indication anything was ignored.
+ *
+ * Worse, it was inconsistent in the dangerous direction: an unvalidated field
+ * like `buckets` matched nothing and correctly returned 0 rows, so the same
+ * class of typo narrowed one filter to empty and widened another to everything.
+ *
+ * A filter whose meaning could not be honoured is a client error, so it is one.
+ */
 function readFilters(url: URL): Filters {
+  const q = url.searchParams;
+
+  const parse = <T>(
+    parameter: string,
+    map: (raw: string) => T | null,
+    expected: string,
+  ): T[] => {
+    const raw = q.get(parameter);
+    const supplied = list(raw);
+    // Absent, or present-but-empty (`?tickers=`), both mean "no filter".
+    if (!supplied.length) return [];
+    const kept = supplied.map(map).filter((v): v is T => v !== null);
+    if (kept.length !== supplied.length) {
+      throw new BadFilterError({ parameter, supplied: raw ?? "", expected });
+    }
+    return kept;
+  };
+
+  const from = q.get("from");
+  if (from !== null && from !== "" && month(from) === null) {
+    throw new BadFilterError({ parameter: "from", supplied: from, expected: "YYYY-MM" });
+  }
+  const to = q.get("to");
+  if (to !== null && to !== "" && month(to) === null) {
+    throw new BadFilterError({ parameter: "to", supplied: to, expected: "YYYY-MM" });
+  }
+
   return {
-    from: month(url.searchParams.get("from")) ?? DEFAULT_FROM,
-    to: month(url.searchParams.get("to")),
-    tickers: list(url.searchParams.get("tickers")).filter((t) => TICKER_RE.test(t)),
-    buckets: list(url.searchParams.get("buckets")),
-    tiers: list(url.searchParams.get("tiers"))
-      .map(Number)
-      .filter((n) => n === 1 || n === 2),
-    onlyWithData: url.searchParams.get("only_with_data") === "1",
+    from: month(from) ?? DEFAULT_FROM,
+    to: month(to),
+    tickers: parse("tickers", (t) => (TICKER_RE.test(t) ? t : null), "4 digits, optionally + one A-Z"),
+    buckets: list(q.get("buckets")),
+    tiers: parse(
+      "tiers",
+      (t) => (t === "1" || t === "2" ? Number(t) : null),
+      "1 or 2",
+    ),
+    onlyWithData: q.get("only_with_data") === "1",
   };
 }
 
@@ -303,21 +389,43 @@ async function heatmap(env: Env, url: URL) {
               SUM(CASE WHEN b.revenue_month IS NOT NULL THEN 1 ELSE 0 END) AS members,
               SUM(b.revenue_month) AS revenue,
 
-              SUM(CASE WHEN b.revenue_yoy_month > 0 THEN b.revenue_month END)     AS yoy_num,
-              SUM(CASE WHEN b.revenue_yoy_month > 0 THEN b.revenue_yoy_month END) AS yoy_den,
+              -- Each pair's predicate is TEXTUALLY IDENTICAL to its members_*
+              -- counter, which is the only way the invariant above is actually
+              -- enforced rather than merely asserted. Gating the denominator on
+              -- a weaker predicate than the numerator is what breaks it: SUM
+              -- skips a NULL numerator silently while the denominator still
+              -- counts that member, so the ratio is computed over two different
+              -- sets and the members_* count describes only one of them.
+              --
+              -- MoM was the live case. analytics_base is universe CROSS JOIN
+              -- month_spine, and prev_revenue is a LAG over that dense grid, so
+              -- it survives on a row where revenue_month is NULL - a company
+              -- that filed last month but has not filed this one landed in
+              -- mom_den alone. A bucket with A (1,000,000 -> 1,100,000) and B
+              -- (500,000, not yet filed) reported -26.67% instead of +10.00%.
+              -- That is the normal state between the 11th and 14th cron runs,
+              -- which exist precisely to sweep up late filers.
+              SUM(CASE WHEN b.revenue_month IS NOT NULL AND b.revenue_yoy_month > 0
+                       THEN b.revenue_month END)     AS yoy_num,
+              SUM(CASE WHEN b.revenue_month IS NOT NULL AND b.revenue_yoy_month > 0
+                       THEN b.revenue_yoy_month END) AS yoy_den,
               SUM(CASE WHEN b.revenue_month IS NOT NULL AND b.revenue_yoy_month > 0
                        THEN 1 ELSE 0 END) AS members_yoy,
 
-              SUM(CASE WHEN b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
+              SUM(CASE WHEN b.revenue_month IS NOT NULL
+                            AND b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
                        THEN b.revenue_month END) AS mom_num,
-              SUM(CASE WHEN b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
+              SUM(CASE WHEN b.revenue_month IS NOT NULL
+                            AND b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
                        THEN b.prev_revenue END)  AS mom_den,
               SUM(CASE WHEN b.revenue_month IS NOT NULL
                             AND b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
                        THEN 1 ELSE 0 END) AS members_mom,
 
-              SUM(CASE WHEN b.cum_revenue_prior > 0 THEN b.cum_revenue END)       AS cum_num,
-              SUM(CASE WHEN b.cum_revenue_prior > 0 THEN b.cum_revenue_prior END) AS cum_den,
+              SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
+                       THEN b.cum_revenue END)       AS cum_num,
+              SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
+                       THEN b.cum_revenue_prior END) AS cum_den,
               SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
                        THEN 1 ELSE 0 END) AS members_cum,
 

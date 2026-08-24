@@ -55,6 +55,26 @@ const RE_NO_DATA = /查無需求資料|查無資料|查無此公司/;
 const RE_NOTE = /營收變化原因說明\s*<\/TH>\s*<TD[^>]*>([\s\S]*?)<\/TD>/i;
 const RE_TAG = /<[^>]+>/g;
 
+/**
+ * The provenance banner: 本資料由（上市公司）台積電 公司提供.
+ *
+ * It carries two things the hidden form fields do not always have. `company_name`
+ * is in VALUE_COLUMNS and therefore inside row_hash, so a Worker that left it null
+ * hashed the same filing differently from the Python backfill - and both write
+ * source_id 'mops_company', so every alternating write would have fired the
+ * restatement trigger. `market` matters because the -KY consolidated pages carry
+ * no <input> tags at all, so the echo is empty there and the banner is the only
+ * source. Both mirror ingest/src/twrev/mops_company.py:278-288 exactly.
+ */
+const RE_BANNER = /本資料由\s*[（(]([^)）]+)[)）]\s*([\s\S]*?)\s*公司提供/;
+const RE_ROC_BANNER = /民國\s*(\d{2,3})\s*年\s*(\d{1,2})\s*月/;
+const MARKET_FROM_BANNER: Record<string, string> = {
+  "上市公司": "sii", "上櫃公司": "otc", "興櫃公司": "rotc",
+};
+
+/** The -KY form's label for the 備註 cell the standalone form calls 營收變化原因說明. */
+const NOTE_LABEL = "備註";
+
 /** In order. The two 增減金額 and two 增減百分比 labels REPEAT - hence positional. */
 const ROW_LABELS = [
   "本月", "去年同期", "增減金額", "增減百分比",
@@ -89,11 +109,55 @@ export function urlFor(ticker: string, month: string, template: string): string 
 }
 
 /**
+ * Decode the HTML character references HTMLRewriter hands back verbatim.
+ *
+ * lol-html gives `text` chunks as they appear in the SOURCE, so `&nbsp;` arrives
+ * as those six literal characters rather than as U+00A0. Every numeric cell on a
+ * real MOPS page is padded with one - the live 2330/2026-03 body has eight - so
+ * without this the figure reads `&nbsp; 415,191,699` and `cleanInt` throws
+ * SchemaDriftError on the first row of every filing. That is a silent kill of the
+ * whole repair path: the cron catches the throw, logs SCHEMA_DRIFT, and moves on.
+ *
+ * Python does not need this because BeautifulSoup resolves references while
+ * building the tree, which is exactly the kind of divergence the two-parser split
+ * has to close by hand.
+ *
+ * The named set is deliberately the five HTML predefined entities plus nbsp,
+ * rather than the full HTML5 table: those are what MOPS emits, and a decoder that
+ * quietly resolved anything else would be a bigger surface than the problem.
+ * Numeric references are handled generally, since they cost nothing.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+};
+
+export function decodeEntities(text: string): string {
+  return text.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body: string) => {
+    if (body.charAt(0) === "#") {
+      const code =
+        body.charAt(1) === "x" || body.charAt(1) === "X"
+          ? parseInt(body.slice(2), 16)
+          : parseInt(body.slice(1), 10);
+      // Lone surrogates and out-of-range values are left as written rather than
+      // replaced with U+FFFD - an unparseable cell must reach cleanInt and throw,
+      // not become a plausible-looking string.
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return whole;
+      if (code >= 0xd800 && code <= 0xdfff) return whole;
+      return String.fromCodePoint(code);
+    }
+    const named = NAMED_ENTITIES[body.toLowerCase()];
+    return named === undefined ? whole : named;
+  });
+}
+
+/**
  * Split the document into rows of cell text.
  *
  * Text arrives in chunks, so every handler appends rather than assigns - a cell
  * containing an entity or a nested tag would otherwise keep only its last chunk,
- * which for a number like 415,191,699 would silently truncate it.
+ * which for a number like 415,191,699 would silently truncate it. Entities are
+ * decoded once per CELL rather than per chunk, because a reference can be split
+ * across two chunks and `&nb` + `sp;` decodes only when rejoined.
  */
 async function tableRows(body: string): Promise<string[][]> {
   const rows: string[][] = [];
@@ -103,7 +167,15 @@ async function tableRows(body: string): Promise<string[][]> {
 
   const flushCell = () => {
     if (inCell) {
-      cells.push(buf.replace(/　/g, " ").replace(/\s+/g, " ").trim());
+      // U+00A0 joins the ideographic space in being normalised away: it is the
+      // padding MOPS wraps every figure in, and \s in JS already covers it, but
+      // being explicit keeps the intent legible next to the entity decoder.
+      cells.push(
+        decodeEntities(buf)
+          .replace(/[　 ]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim(),
+      );
       buf = "";
       inCell = false;
     }
@@ -205,6 +277,20 @@ export async function parseMops(
       `${ticker}: requested ${month} (${wantRoc}) but response echoes ${echo.Q2V}`,
     );
   }
+  // The -KY consolidated pages carry no <input> tags, so without this fallback
+  // those two filers get no month check at all and a server that ignored the
+  // month parameter would file one month's figures under another's key. Python
+  // has always had it (mops_company.py:267-274); this closes the gap.
+  const bannerMonth = RE_ROC_BANNER.exec(body);
+  if (bannerMonth) {
+    const got = `${Number(bannerMonth[1])}${String(Number(bannerMonth[2])).padStart(2, "0")}`;
+    if (got !== wantRoc) {
+      throw new SchemaDriftError(
+        `${ticker}: banner says 民國${bannerMonth[1]}年${bannerMonth[2]}月 but ` +
+          `${month} (${wantRoc}) was requested`,
+      );
+    }
+  }
   // If MOPS ever reported in 元 rather than 仟元 the figures would be 1000x off
   // with no other visible symptom, so an absent declaration is fatal.
   if (!body.includes(UNIT_ANCHOR)) {
@@ -243,15 +329,40 @@ export async function parseMops(
   const row: RawRow = {};
   for (const col of RAW_COLUMNS) row[col] = null;
   row.source_id = SOURCE_ID;
-  row.market = (echo.Market || "").trim().toLowerCase() || null;
-  if (row.market !== null && !["sii", "otc"].includes(String(row.market))) {
-    // raw_revenue models only the two listed boards; 興櫃 would be a real change.
+
+  // Banner first, because it is the only surface the -KY pages have, and because
+  // company_name is inside row_hash - see RE_BANNER above.
+  let market: string | null = (echo.Market || "").trim().toLowerCase() || null;
+  const banner = RE_BANNER.exec(body.replace(/　/g, " "));
+  if (banner) {
+    const bannerMarket = MARKET_FROM_BANNER[(banner[1] ?? "").trim()] ?? null;
+    row.company_name = cleanText(decodeEntities((banner[2] ?? "").replace(RE_TAG, " ")));
+    if (bannerMarket && market && bannerMarket !== market) {
+      findings.push({
+        severity: "warn", code: "MARKET_ECHO_DISAGREEMENT",
+        message:
+          `${ticker} ${month}: Market field says ${market} but the banner says ` +
+          `${banner[1]} (${bannerMarket})`,
+      });
+    }
+    market = market || bannerMarket;
+  }
+  if (market !== null && !["sii", "otc", "rotc"].includes(market)) {
     findings.push({
       severity: "warn", code: "UNKNOWN_MARKET",
-      message: `${ticker} ${month}: market=${row.market}`,
+      message: `${ticker} ${month}: market=${market}`,
     });
-    row.market = null;
+    market = null;
   }
+  if (market === "rotc") {
+    // raw_revenue models only the two listed boards; 興櫃 would be a real change.
+    findings.push({
+      severity: "warn", code: "EMERGING_BOARD",
+      message: `${ticker} ${month}: reported on 興櫃 (emerging board), not sii/otc`,
+    });
+    market = null;
+  }
+  row.market = market;
   row.month = month;
   row.month_idx = monthIdx(month);
   row.ticker = ticker;
@@ -268,7 +379,7 @@ export async function parseMops(
     else row[target] = cleanInt(raw);
   });
 
-  const note = extractNote(body);
+  const note = extractNote(body, rows);
   if (note) row.note = note;
 
   findings.push(...selfCheck(row, deltas, ticker, month));
@@ -279,11 +390,33 @@ export async function parseMops(
   return { status: "data", ticker, month, row, findings };
 }
 
-/** The 備註 cell, from raw markup - its row's markup is malformed. */
-function extractNote(body: string): string | null {
+/**
+ * The 備註 cell.
+ *
+ * The standalone form labels it 營收變化原因說明 and its row's markup is malformed,
+ * so that one is taken from raw markup rather than from the parsed rows.
+ *
+ * The -KY consolidated form labels the same cell plain 備註 and writes it as
+ * ordinary `<td class='tblHead'>備註</td><td class='odd'>…</td>`, which the
+ * 營收變化原因說明 pattern cannot match - so before this fallback the issuer's
+ * mandatory explanation of the swing was discarded for exactly the two filers
+ * (3661, 6415) whose levels already carry a comparability caveat. Those rows are
+ * already in `rows`; nothing needs re-parsing.
+ */
+function extractNote(body: string, rows: string[][]): string | null {
   const m = RE_NOTE.exec(body);
-  if (!m) return null;
-  return cleanText(m[1].replace(RE_TAG, " ").replace(/&nbsp;/g, " "));
+  if (m) {
+    const text = cleanText(decodeEntities(m[1].replace(RE_TAG, " ")));
+    if (text) return text;
+  }
+  const labelled = rows.find((r) => r[0] === NOTE_LABEL && r.length > 1);
+  if (!labelled) return null;
+  // The -KY row is [備註, text, &nbsp;]: take the first cell that has content.
+  for (const cell of labelled.slice(1)) {
+    const text = cleanText(cell);
+    if (text) return text;
+  }
+  return null;
 }
 
 /**

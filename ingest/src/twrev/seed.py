@@ -195,7 +195,33 @@ def build(
 
         # ------------------------------------------------- quality_findings --
         w("-- ==================================================== quality_findings ==")
-        w(f"DELETE FROM quality_findings WHERE run_id = '{run_id}';")
+        # Scoped exactly like the fetch_log DELETE above, and for the same reason.
+        #
+        # This used to read `WHERE run_id = '<run_id>'`, which could never match:
+        # the run_id is minted fresh on every run (backfill.py), so the DELETE
+        # always cleared zero rows and the whole finding set was appended again.
+        # Two applies of the documented repair path left two copies of every
+        # finding, and a problem FIXED by a later backfill kept its original
+        # finding sitting in the Quality tab forever.
+        #
+        # Scope is by MONTH, like the fetch_log DELETE, not by run_id: the seed
+        # speaks for a window, and it should replace whatever the seed path last
+        # said about that window whatever that run happened to call itself.
+        # Matching run_id prefixes instead would silently depend on a naming
+        # convention that `backfill.run(run_id=...)` lets a caller override.
+        #
+        # The cron scopes its own DELETE to `run_id LIKE 'cron-%'`, so excluding
+        # exactly that keeps the two writers from deleting each other's verdicts.
+        # month IS NULL catches whole-run findings, which belong to the run
+        # rather than to any one month.
+        if months:
+            month_in = ", ".join(f"'{m}'" for m in months)
+            w("DELETE FROM quality_findings "
+              "WHERE run_id NOT LIKE 'cron-%' "
+              f"AND (month IN ({month_in}) OR month IS NULL);")
+        else:
+            w("DELETE FROM quality_findings "
+              "WHERE run_id NOT LIKE 'cron-%' AND month IS NULL;")
         if report.findings:
             out.extend(insert_batch_values_sql(
                 "quality_findings", FINDING_COLUMNS, report.findings

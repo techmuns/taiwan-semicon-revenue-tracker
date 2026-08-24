@@ -158,7 +158,7 @@ one request. This is the break-glass path when a month is missing or looks wrong
 cd ingest
 python -m twrev.cli backfill --from 2026-07 --to 2026-07 --tickers 3324
 python -m twrev.cli show --ticker 3324
-python -m twrev.cli seed --out out/seed.sql
+python -m twrev.cli seed --from 2026-07 --to 2026-07 --out out/seed.sql
 npx wrangler d1 execute taiwan-semicon-revenue --file=../ingest/out/seed.sql --remote --cwd ../worker
 ```
 
@@ -174,7 +174,7 @@ Other CLI subcommands:
 | `backfill --from --to [--tickers] [--offline]` | Fetch + parse a window into `ingest/cache/`. |
 | `report` | Re-parse the cache offline and summarise. Free — no network. |
 | `verify --month 2026-07` | Cross-check the MOPS scrape against the `_P`/`_L`/`_O` feeds. |
-| `seed --out out/seed.sql` | Emit D1 SQL from the cache. |
+| `seed --from --to --out out/seed.sql` | Emit D1 SQL from the cache. The window is required, and scopes the idempotent DELETEs. |
 | `show --ticker 2330` | Print one ticker's series from the cache. |
 
 `ingest/cache/` holds the raw fetched bytes and is the real audit artifact. It is

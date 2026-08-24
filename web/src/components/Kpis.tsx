@@ -24,7 +24,8 @@
 import { WidgetCard } from "./WidgetCard";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
 import { forMonth, medianOf, sumRevenue, weightedYoY } from "../stats";
-import type { AnalyticsRow, BucketCell, Meta } from "../types";
+import { metricSpec } from "../scale";
+import type { AnalyticsRow, BucketCell, HeatmapMetric, Meta } from "../types";
 
 interface Kpi {
   label: string;
@@ -69,15 +70,30 @@ export function Kpis({
   meta,
   bucketCells,
   latestMonth,
+  metric,
+  filtered = false,
 }: {
   rows: AnalyticsRow[];
   meta: Meta | null;
   bucketCells: BucketCell[] | null;
   latestMonth: string | null;
+  /**
+   * Which metric `bucketCells` carries. Required, because the fastest/slowest
+   * basis used to hardcode "ppt" while the cells come from the metric-selectable
+   * bucket heatmap - so choosing YoY growth, MoM growth or Cumulative YoY
+   * labelled a percentage as percentage points, which on this dashboard are two
+   * different quantities (a rate versus the change in that rate).
+   */
+  metric: HeatmapMetric;
+  /** Whether a stage/tier filter is narrowing `rows`. See the subtitle below. */
+  filtered?: boolean;
 }) {
   const monthRows = forMonth(rows, latestMonth);
   const universeN = meta?.universe.length ?? 0;
   const trackable = meta?.universe.filter((u) => u.status === "active").length ?? 0;
+  const spec = metricSpec(metric);
+  /** The stage cells are in the metric's own unit, which is not always ppt. */
+  const stageValue = (v: number | null) => (spec.unit === "ppt" ? ppt(v) : pct(v));
 
   const total = sumRevenue(monthRows);
   const wYoY = weightedYoY(monthRows);
@@ -121,7 +137,7 @@ export function Kpis({
       label: "Fastest stage",
       value: leader ? leader.bucket : NA,
       basis: leader
-        ? `${ppt(leader.value)} · ${leader.members_with_revenue} of ${leader.members} filed`
+        ? `${stageValue(leader.value)} · ${leader.members_with_revenue} filed, ${leader.members} comparable`
         : "no stage has a value this month",
       text: true,
     },
@@ -129,7 +145,7 @@ export function Kpis({
       label: "Slowest stage",
       value: laggard ? laggard.bucket : NA,
       basis: laggard
-        ? `${ppt(laggard.value)} · ${laggard.members_with_revenue} of ${laggard.members} filed`
+        ? `${stageValue(laggard.value)} · ${laggard.members_with_revenue} filed, ${laggard.members} comparable`
         : "needs two or more stages",
       text: true,
     },
@@ -141,7 +157,14 @@ export function Kpis({
         title="Summary"
         subtitle={
           latestMonth
-            ? `${monthLabel(latestMonth)} · ${total.n} of ${trackable} trackable filed · ${universeN} in universe`
+            ? filtered
+              // `total.n` counts filings among the FILTERED rows, while
+              // `trackable`/`universeN` come from the unfiltered /api/meta. Read
+              // as one fraction that said "3 of 36 trackable filed" when 33 names
+              // were merely filtered out, which reads as a filing failure.
+              ? `${monthLabel(latestMonth)} · ${total.n} filed in the current filter · ` +
+                `${trackable} trackable of ${universeN} in universe`
+              : `${monthLabel(latestMonth)} · ${total.n} of ${trackable} trackable filed · ${universeN} in universe`
             : "no data loaded"
         }
         full

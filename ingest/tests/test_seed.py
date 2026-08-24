@@ -167,6 +167,57 @@ def test_reapplying_seed_is_idempotent(report):
     ).fetchone()["c"] == 0, "an unchanged re-apply wrote restatement history"
 
 
+def test_regenerated_seed_does_not_duplicate_findings(report):
+    """The repair path REGENERATES the seed, so the run_id differs each time.
+
+    The findings DELETE used to be scoped to the seed's own run_id, which is
+    minted fresh per run - so it matched nothing and every regenerate-and-apply
+    appended a second full copy of the finding set. Worse than the duplication:
+    a problem FIXED by the newer backfill kept its original finding sitting in
+    the Quality tab, because nothing ever deleted it.
+    """
+    conn = apply_sql(seed.build(universe=load_universe(), report=report))
+    first = conn.execute("SELECT count(*) AS c FROM quality_findings").fetchone()["c"]
+    assert first, "fixture should produce at least one finding"
+
+    # Same window, same content, a new run - exactly what `backfill` then `seed`
+    # produces on the documented repair path.
+    report.run_id = "test-run-regenerated"
+    for f in report.findings:
+        f["run_id"] = "test-run-regenerated"
+    conn.executescript(seed.build(universe=load_universe(), report=report))
+    conn.commit()
+
+    after = conn.execute("SELECT count(*) AS c FROM quality_findings").fetchone()["c"]
+    assert after == first, f"regenerated seed duplicated findings: {first} -> {after}"
+
+
+def test_seed_does_not_delete_the_crons_findings(report):
+    """The two writers must not clear each other's verdicts.
+
+    The cron scopes its own DELETE to run_id LIKE 'cron-%'; the seed scopes to
+    the months it speaks for and excludes exactly that prefix. A seed that wiped
+    the cron's findings would silently blank the Quality tab for the newest
+    month, which is the month anyone is actually reading.
+    """
+    conn = apply_sql(seed.build(universe=load_universe(), report=report))
+    conn.execute(
+        "INSERT INTO quality_findings "
+        "(run_id, created_at_utc, severity, code, month, ticker, source_id, message) "
+        "VALUES ('cron-2026-08-11T01:00:00Z', '2026-08-11T01:00:00Z', 'warn', "
+        "'MOM_OUTLIER', '2026-03', '3661', 'twse_openapi_l', 'MoM 108%')"
+    )
+    conn.commit()
+
+    conn.executescript(seed.build(universe=load_universe(), report=report))
+    conn.commit()
+
+    survived = conn.execute(
+        "SELECT count(*) AS c FROM quality_findings WHERE run_id LIKE 'cron-%'"
+    ).fetchone()["c"]
+    assert survived == 1, "the seed deleted a finding the cron owns"
+
+
 def test_reseed_preserves_first_seen_and_records_restatement(report):
     universe = load_universe()
     conn = apply_sql(seed.build(universe=universe, report=report))

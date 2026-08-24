@@ -71,8 +71,12 @@ export function Sources({ meta, now }: { meta: Meta; now: number }) {
         subtitle="Companies with a filing, by month, newest first"
         staticCard
       >
+        {/* The server returns these ascending by month_idx, so rendering them
+            as-is put the excluded Dec-2025 shoulder month at the top under a
+            subtitle promising "newest first". Reverse a copy - never in place,
+            since `meta` is shared with the rest of the dashboard. */}
         <div style={{ maxHeight: 260, overflow: "auto" }}>
-          {meta.freshness.map((f) => (
+          {[...meta.freshness].reverse().map((f) => (
             <div
               key={f.month}
               style={{

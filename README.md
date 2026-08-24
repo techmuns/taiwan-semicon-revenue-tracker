@@ -94,7 +94,7 @@ each in full:
 # backfill (296 requests, ~15-20 min, resumable, cached to ingest/cache/)
 cd ingest && pip install -r requirements.txt
 python -m twrev.cli backfill --from 2025-12 --to 2026-07
-python -m twrev.cli seed --out out/seed.sql
+python -m twrev.cli seed --from 2025-12 --to 2026-07 --out out/seed.sql
 
 # load
 cd ../worker && npx wrangler d1 migrations apply taiwan-semicon-revenue --remote

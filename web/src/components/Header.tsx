@@ -53,7 +53,19 @@ export function Header({
   const company = ticker
     ? meta?.universe.find((u) => u.ticker === ticker)?.display_name
     : undefined;
-  const lastSeen = meta?.freshness?.[0]?.last_seen_utc ?? null;
+  // /api/meta orders freshness by month_idx ASCENDING, so [0] is the OLDEST
+  // month - currently the excluded Dec-2025 shoulder - while this label pairs it
+  // with `latest_month`. The chip therefore aged with the backfill rather than
+  // with the cron, and would have kept reporting a months-old timestamp next to
+  // a freshly written month. Take the entry for the month actually named, and
+  // fall back to the newest row rather than the oldest.
+  const freshness = meta?.freshness ?? [];
+  const lastSeen =
+    (meta?.latest_month
+      ? freshness.find((f) => f.month === meta.latest_month)?.last_seen_utc
+      : undefined) ??
+    freshness[freshness.length - 1]?.last_seen_utc ??
+    null;
 
   return (
     <header

@@ -102,9 +102,16 @@ export function Buckets({
 }) {
   const months = sortedMonths(rows);
   const byBucket = groupBy(rows, (r) => r.bucket);
-  const stages = [...byBucket.entries()]
-    .map(([bucket, rs]) => buildIndex(bucket, rs, months))
-    .sort((a, b) => a.bucket.localeCompare(b.bucket));
+  // Chain order, NOT alphabetical. /api/analytics already delivers rows in
+  // supply-chain sequence via `ORDER BY u.sort_order` (api.ts), which is the one
+  // reading the whole tracker is built around: silicon -> packaging -> substrate
+  // -> rack -> networking -> thermal -> power -> equipment. `groupBy` preserves
+  // first-appearance order, so honouring it is just declining to re-sort;
+  // alphabetising put Advanced Packaging ahead of AI Silicon and scattered the
+  // rest, which is exactly the ordering the stage panels exist to show.
+  const stages = [...byBucket.entries()].map(([bucket, rs]) =>
+    buildIndex(bucket, rs, months),
+  );
 
   if (stages.length === 0 || months.length === 0) {
     return (

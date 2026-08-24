@@ -69,8 +69,16 @@ function MoverList({
               <td style={{ padding: "5px 6px", width: 80 }}>
                 <Sparkline
                   values={yoyPath}
+                  // Three states, not two. Band 0 is the neutral |accel| < 2ppt
+                  // window, which the adjacent cell fills gray; sending it to
+                  // the else arm stroked a small POSITIVE accelerator in the
+                  // blue "slowing" hue, contradicting the cell beside it.
                   color={
-                    band !== null && band > 0 ? "var(--div-pos-2)" : "var(--div-neg-2)"
+                    band === null || band === 0
+                      ? "var(--div-mid)"
+                      : band > 0
+                        ? "var(--div-pos-2)"
+                        : "var(--div-neg-2)"
                   }
                 />
               </td>

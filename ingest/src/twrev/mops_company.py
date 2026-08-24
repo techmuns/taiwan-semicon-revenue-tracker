@@ -89,7 +89,19 @@ TABLE_ANCHOR = "營業收入淨額"
 RE_BANNER = re.compile(r"本資料由\s*[（(]([^)）]+)[)）]\s*(.*?)\s*公司提供")
 RE_ROC_BANNER = re.compile(r"民國\s*(\d{2,3})\s*年\s*(\d{1,2})\s*月")
 # The 備註 cell, taken from raw markup because parsers disagree about the row.
+#
+# Two forms, two labels. The standalone form writes 備註 / 營收變化原因說明 in a
+# <TH> followed by the value <TD>. The foreign-issuer (-KY) form labels the same
+# cell plain 備註 in an ordinary <td class='tblHead'>, which the first pattern
+# cannot match - so 3661 and 6415 silently lost the issuer's mandatory
+# explanation of the revenue swing, which is exactly the sentence a reader wants
+# when the -KY levels already carry a comparability caveat. RE_NOTE_KY closes
+# that, and worker/src/mops.ts takes the same cell from its parsed rows so both
+# writers of source_id 'mops_company' agree - `note` is inside row_hash.
 RE_NOTE = re.compile(r"營收變化原因說明\s*</TH>\s*<TD[^>]*>(.*?)</TD>", re.I | re.S)
+RE_NOTE_KY = re.compile(
+    r"<td[^>]*>\s*備註\s*</td>\s*<td[^>]*>(.*?)</td>", re.I | re.S
+)
 RE_TAG = re.compile(r"<[^>]+>")
 
 MARKET_FROM_BANNER = {"上市公司": "sii", "上櫃公司": "otc", "興櫃公司": "rotc"}
@@ -201,11 +213,16 @@ def _revenue_table_rows(soup: BeautifulSoup) -> list[list[str]]:
 
 
 def _extract_note(raw_html: str) -> str | None:
-    m = RE_NOTE.search(raw_html)
-    if not m:
-        return None
-    text = RE_TAG.sub(" ", m.group(1)).replace("&nbsp;", " ")
-    return clean_text(text)
+    """The note, from either form. See RE_NOTE / RE_NOTE_KY above."""
+    for pattern in (RE_NOTE, RE_NOTE_KY):
+        m = pattern.search(raw_html)
+        if not m:
+            continue
+        text = RE_TAG.sub(" ", m.group(1)).replace("&nbsp;", " ")
+        cleaned = clean_text(text)
+        if cleaned:
+            return cleaned
+    return None
 
 
 def parse(

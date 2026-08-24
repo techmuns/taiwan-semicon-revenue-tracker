@@ -147,6 +147,30 @@ def test_second_ky_company(fixtures_dir):
     assert [f for f in out.findings if f[0] == "error"] == []
 
 
+@pytest.mark.parametrize(
+    "name,ticker,month,fragment",
+    [
+        ("3661_11503.html", "3661", "2026-03", "量產產品減少"),
+        ("6415_11507.html", "6415", "2026-07", "需求增加"),
+    ],
+)
+def test_ky_form_note_is_not_dropped(fixtures_dir, name, ticker, month, fragment):
+    """The -KY form labels the note cell plain 備註, not 營收變化原因說明.
+
+    Only the second label was matched, so the issuer's mandatory explanation of
+    the revenue swing was silently discarded for exactly the two filers whose
+    LEVELS already carry a comparability caveat - the sentence a reader most
+    wants when they cannot compare the level. `note` is inside row_hash, so this
+    also has to agree with worker/src/mops.ts or the two writers of
+    source_id='mops_company' would hash the same filing differently.
+    """
+    out = mc.parse_from_bytes(load(fixtures_dir, name), ticker=ticker, month=month)
+    assert out.row["note"], "the -KY 備註 was lost"
+    assert fragment in out.row["note"]
+    # The label must not leak into the value.
+    assert not out.row["note"].startswith("備註")
+
+
 # The currency sub-header exactly as it appears in the fixture.
 SUBHEADER_TWD_FIRST = (
     "<TD align='center' class='tblHead'>新台幣</TD>"

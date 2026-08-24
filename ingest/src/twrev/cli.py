@@ -265,14 +265,29 @@ def cmd_show(args: argparse.Namespace) -> int:
           f"| {company.bucket} | tier {company.tier} | {company.status}")
     print(f"{'month':<9}{'revenue':>15}{'yoy base':>15}{'yoy%':>9}"
           f"{'cum':>16}{'cum yoy%':>10}  note")
+    # `show` is the break-glass command for a month that looks wrong, so it has
+    # to survive the row that IS wrong. A None revenue_month - a cell MOPS left
+    # blank - used to crash it twice over: once dividing by it for MoM, once
+    # formatting None with a thousands separator. An em dash carries the same
+    # meaning the rest of the project gives it, and never means zero.
+    def num(value: Any, width: int, digits: int = 0) -> str:
+        if value is None:
+            return f"{'—':>{width}}"
+        return f"{value:>{width},.{digits}f}" if digits else f"{value:>{width},}"
+
     prev = None
     for r in sorted(report.rows, key=lambda r: r["month"]):
         mom = ""
-        if prev and prev["month_idx"] == r["month_idx"] - 1 and prev["revenue_month"]:
+        if (
+            prev
+            and prev["month_idx"] == r["month_idx"] - 1
+            and prev["revenue_month"]
+            and r["revenue_month"] is not None
+        ):
             mom = f"{100.0 * (r['revenue_month'] / prev['revenue_month'] - 1):+.1f}%"
-        print(f"{r['month']:<9}{r['revenue_month']:>15,}{r['revenue_yoy_month'] or 0:>15,}"
-              f"{r['src_yoy_pct'] or 0:>8.2f}%{r['cum_revenue'] or 0:>16,}"
-              f"{r['src_cum_yoy_pct'] or 0:>9.2f}%  mom {mom:<8}{(r['note'] or '')[:50]}")
+        print(f"{r['month']:<9}{num(r['revenue_month'], 15)}{num(r['revenue_yoy_month'], 15)}"
+              f"{num(r['src_yoy_pct'], 8, 2)}%{num(r['cum_revenue'], 16)}"
+              f"{num(r['src_cum_yoy_pct'], 9, 2)}%  mom {mom:<8}{(r['note'] or '')[:50]}")
         prev = r
     if not report.rows:
         print("  (no rows - see findings)")

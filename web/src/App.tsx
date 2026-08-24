@@ -303,6 +303,10 @@ function OverviewTab({
         meta={meta}
         bucketCells={heat.data?.cells ?? null}
         latestMonth={latestMonth}
+        metric={metric}
+        filtered={
+          filters.tickers.length > 0 || filters.buckets.length > 0 || filters.tiers.length > 0
+        }
       />
 
       <div style={GRID}>
@@ -397,8 +401,13 @@ function bucketRows(d: BucketHeatmap): HeatRow[] {
             detail: (
               <>
                 <div>Stage revenue: {revenue(c.revenue)}</div>
+                {/* These are two different counts, not a fraction. `members` is
+                    the metric's own basis (members_yoy / members_mom /
+                    members_cum, api.ts:498), `members_with_revenue` is the plain
+                    filed count - so the "of" reading printed a numerator that is
+                    always >= its denominator. */}
                 <div>
-                  {c.members_with_revenue} of {c.members} names filed
+                  {c.members_with_revenue} filed · {c.members} with a comparable
                 </div>
               </>
             ),
