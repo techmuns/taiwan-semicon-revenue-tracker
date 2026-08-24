@@ -91,6 +91,36 @@ export function weightedYoY(rows: readonly AnalyticsRow[]): Agg {
   return { value: 100 * (now / prior - 1), n, missing };
 }
 
+/**
+ * The arithmetic mean of one series ACROSS MONTHS. Nulls leave both the sum and
+ * the divisor, so they are never silently zero.
+ *
+ * This is a different operation from `weightedYoY` above and the distinction is
+ * the one that gets confused, so it is worth stating. `weightedYoY` aggregates
+ * across *companies* within one month, where averaging ratios would weight a
+ * NT$300m substrate maker the same as TSMC - hence levels, never percentages.
+ * This averages *one row across time*, where every term is already the same
+ * company's rate, or the same stage's already-revenue-weighted rate. Those terms
+ * are commensurable, so the mean of them is a real number.
+ *
+ * `n` is returned and every caller prints it, because the mean of the three
+ * months a company filed and the mean of the eight months in view are different
+ * claims about the world.
+ */
+export function meanOf(values: readonly (number | null | undefined)[]): Agg {
+  let total = 0;
+  let n = 0;
+  let missing = 0;
+  for (const v of values) {
+    if (v === null || v === undefined || Number.isNaN(v)) missing++;
+    else {
+      total += v;
+      n++;
+    }
+  }
+  return { value: n ? total / n : null, n, missing };
+}
+
 export function groupBy<T>(rows: readonly T[], key: (r: T) => string): Map<string, T[]> {
   const out = new Map<string, T[]>();
   for (const r of rows) {

@@ -15,7 +15,18 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { NA, isMissing, monthShort } from "../format";
 import { bandFor, cellStyle, legendStops, metricSpec } from "../scale";
+import { meanOf } from "../stats";
 import type { HeatmapMetric } from "../types";
+
+/**
+ * The summary column is set off by a 2px rule rather than a different fill.
+ *
+ * It carries the same metric on the same scale as the cells beside it, so it gets
+ * the same color encoding - that is exactly what makes it readable in the same
+ * glance. What it must not do is read as a ninth month, and a rule says so without
+ * spending any color the values are already using.
+ */
+const SUMMARY_EDGE = "2px solid var(--border-solid)";
 
 export interface HeatCellData {
   value: number | null;
@@ -45,6 +56,7 @@ export function Heatmap({
   rowHeader = "Group",
   onRowClick,
   maxHeight = 460,
+  average = true,
 }: {
   months: string[];
   rows: HeatRow[];
@@ -52,6 +64,8 @@ export function Heatmap({
   rowHeader?: string;
   onRowClick?: (key: string) => void;
   maxHeight?: number;
+  /** The trailing per-row mean across the months in view. */
+  average?: boolean;
 }) {
   const [tip, setTip] = useState<TipState | null>(null);
   const spec = metricSpec(metric);
@@ -119,10 +133,39 @@ export function Heatmap({
                   )}
                 </th>
               ))}
+              {average && (
+                <th
+                  scope="col"
+                  title={`Mean ${spec.label.toLowerCase()} across the months in view, per row. Absent months are excluded from the divisor, never counted as zero.`}
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    right: 0,
+                    zIndex: 3,
+                    background: "var(--chart-surface)",
+                    padding: "6px 6px",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    color: "var(--text-secondary)",
+                    borderBottom: "1px solid var(--grid-line)",
+                    borderLeft: SUMMARY_EDGE,
+                    minWidth: 52,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Avg
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row) => {
+              const avg = average
+                ? meanOf(months.map((m) => row.cells[m]?.value ?? null))
+                : null;
+              return (
               <tr key={row.key}>
                 <th
                   scope="row"
@@ -227,8 +270,66 @@ export function Heatmap({
                     </td>
                   );
                 })}
+                {avg && (
+                  <td
+                    style={{
+                      ...cellStyle(avg.value, metric),
+                      position: "sticky",
+                      right: 0,
+                      zIndex: 1,
+                      padding: "0 4px",
+                      textAlign: "center",
+                      border: "1px solid var(--chart-surface)",
+                      borderLeft: SUMMARY_EDGE,
+                      height: 24,
+                      fontWeight: 600,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                    onPointerMove={(e) => {
+                      const host = e.currentTarget.closest("div");
+                      const r = host?.getBoundingClientRect();
+                      setTip({
+                        x: r ? e.clientX - r.left : 0,
+                        y: r ? e.clientY - r.top : 0,
+                        content: (
+                          <>
+                            <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                              {row.label} · average
+                            </div>
+                            <div>
+                              Mean {spec.label.toLowerCase()}:{" "}
+                              <strong style={{ color: "var(--text-primary)" }}>
+                                {isMissing(avg.value)
+                                  ? "no data"
+                                  : `${(avg.value as number) > 0 ? "+" : ""}${(avg.value as number).toFixed(1)} ${spec.unit}`}
+                              </strong>
+                            </div>
+                            <div style={{ color: "var(--text-hint)" }}>
+                              over {avg.n} of {months.length} month
+                              {months.length === 1 ? "" : "s"} in view
+                              {avg.missing > 0 ? " · absent months excluded, not zeroed" : ""}
+                            </div>
+                          </>
+                        ),
+                      });
+                    }}
+                    onPointerLeave={() => setTip(null)}
+                  >
+                    {isMissing(avg.value) ? (
+                      <span style={{ fontSize: 10 }}>{NA}</span>
+                    ) : (
+                      <>
+                        {(avg.value as number) > 0 ? "+" : ""}
+                        {(avg.value as number).toFixed(
+                          Math.abs(avg.value as number) >= 100 ? 0 : 1,
+                        )}
+                      </>
+                    )}
+                  </td>
+                )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

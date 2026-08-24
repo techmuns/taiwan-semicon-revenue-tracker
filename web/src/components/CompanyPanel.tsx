@@ -186,6 +186,10 @@ export function CompanyPanel({ detail, viz }: { detail: CompanyDetail; viz: View
                   format: revenue,
                   exact: revenueExact,
                   color: "var(--seq-550)",
+                  averageNote:
+                    "Read this one with care: YTD ratchets up through the year and resets each " +
+                    "January, so its mean is mostly a statement about where the window starts, " +
+                    "not about the company. The monthly revenue average is the comparable figure.",
                 },
               ]}
               note="Resets to the January figure each year"
