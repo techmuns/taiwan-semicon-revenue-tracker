@@ -9,6 +9,32 @@
       content="Monthly revenue across the Taiwanese AI semiconductor supply chain, from MOPS and TWSE/TPEx filings."
     />
     <!-- No custom fonts: system-ui only, per the dashboard UI standard. -->
+    <!-- Tells the UA to render form controls and the canvas for both themes, so
+         a scrollbar or a <select> is not left light on a dark page. -->
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      Theme, before first paint.
+
+      This is deliberately a BLOCKING inline script rather than part of the
+      module bundle. The bundle is deferred, so by the time it runs the browser
+      has already painted - and a dark-theme reader would get one white frame on
+      every single navigation. Reading localStorage here costs well under a
+      millisecond and removes the flash entirely.
+
+      Only an explicit choice is stamped. With nothing stored, no attribute is
+      set and the prefers-color-scheme media query in tokens.css decides.
+      The key is shared with src/theme.ts - keep the two in step.
+    -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("twrev_theme");
+          if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        } catch (e) {
+          /* Private mode: fall through to the OS preference. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

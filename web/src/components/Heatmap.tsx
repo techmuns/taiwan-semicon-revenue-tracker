@@ -101,6 +101,11 @@ export function Heatmap({
                   letterSpacing: "0.04em",
                   color: "var(--ink-muted)",
                   borderBottom: "1px solid var(--grid-line)",
+                  // Pinned, not just a minimum. Under `width: 100%` the browser
+                  // hands all slack to the first column, so on a wide screen the
+                  // label column grew a large empty gutter and squeezed the
+                  // months into the right-hand third.
+                  width: 200,
                   minWidth: 168,
                 }}
               >
@@ -345,7 +350,7 @@ export function Heatmap({
             background: "var(--card-bg)",
             border: "1px solid var(--border-solid)",
             borderRadius: "var(--radius-control)",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.10)",
+            boxShadow: "var(--tooltip-shadow)",
             padding: "6px 9px",
             fontSize: 12,
             lineHeight: 1.45,

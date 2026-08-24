@@ -4,9 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/check-theme-parity.mjs && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check-theme": "node scripts/check-theme-parity.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

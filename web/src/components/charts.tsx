@@ -25,8 +25,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { NA, isMissing, monthShort } from "../format";
 
-/** Categorical slots, fixed order. A 4th series is not a new hue - it is a facet. */
-export const SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"] as const;
+/**
+ * Categorical slots, fixed order. A 4th series is not a new hue - it is a facet.
+ *
+ * These are `var()` references rather than hexes so the slots can be re-stepped
+ * for the dark surface. That is not a cosmetic nicety: reusing the light hexes on
+ * dark FAILS the palette validator (orange #eb6834 sits at OKLCH L 0.671, outside
+ * the dark lightness band), which is why the dark theme selects its own steps
+ * instead of inverting these. Every consumer feeds them straight to SVG
+ * stroke/fill, which take var() unchanged.
+ */
+export const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)"] as const;
 
 // ------------------------------------------------------------------ sizing --
 
@@ -74,7 +83,7 @@ function Tooltip({ tip, width }: { tip: TipState; width: number }) {
         background: "var(--card-bg)",
         border: "1px solid var(--border-solid)",
         borderRadius: "var(--radius-control)",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.10)",
+        boxShadow: "var(--tooltip-shadow)",
         padding: "6px 9px",
         fontSize: 12,
         lineHeight: 1.45,

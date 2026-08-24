@@ -123,7 +123,15 @@ export function MatrixTable({
             <tr>
               <th
                 scope="col"
-                style={{ ...HEAD, left: 0, zIndex: 3, textAlign: "left", minWidth: 168 }}
+                // Pinned for the same reason as the heatmap's - see Heatmap.tsx.
+                style={{
+                  ...HEAD,
+                  left: 0,
+                  zIndex: 3,
+                  textAlign: "left",
+                  width: 200,
+                  minWidth: 168,
+                }}
               >
                 {rowHeader}
               </th>

@@ -140,6 +140,196 @@
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
+
+  /*
+   * The categorical series slots, promoted out of charts.tsx so they can be
+   * themed. Slots are assigned in FIXED ORDER and never cycled; a fourth series
+   * folds into "Other" or becomes a facet rather than growing a new hue.
+   */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+
+  /*
+   * Ink per diverging band, replacing the two hardcoded #ffffff that used to sit
+   * in scale.ts. Four tokens rather than seven because the arms are
+   * lightness-mirrored, so the sign cannot change the answer.
+   *
+   * In LIGHT the fills darken outward, so only the extremes need white ink
+   * (measured 8.1:1 and 8.6:1). In DARK the ramp inverts - see the dark block -
+   * and so does this: bands 0/1 take white, 2/3 take dark ink. Leaving the old
+   * literal in place would have printed white on a pale blue cell.
+   */
+  --ink-on-div-0: var(--text-primary);
+  --ink-on-div-1: var(--text-primary);
+  --ink-on-div-2: var(--text-primary);
+  --ink-on-div-3: #ffffff;
+
+  /* Elevation exists in exactly one place: the floating tooltip. */
+  --tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  /* The veil over stale content while a refresh is in flight. */
+  --scrim: rgba(255, 255, 255, 0.35);
+  --shimmer-a: #eceef1;
+  --shimmer-b: #f6f7f8;
+}
+
+/**
+ * DARK THEME
+ *
+ * Selected, not flipped. Every step below was chosen for the dark surface and
+ * validated against it - the palette validator FAILS if the light hexes are
+ * simply reused (orange #eb6834 lands at OKLCH L 0.671, outside the dark band),
+ * which is exactly why an automatic inversion is not on the table.
+ *
+ * Declared under two scopes that must stay in sync:
+ *   - the media query covers the OS setting, and is written with :where() so its
+ *     specificity stays at zero and the toggle below always wins;
+ *   - the [data-theme="dark"] scope covers an explicit choice.
+ * The :not([data-theme="light"]) guard is what lets an explicit LIGHT choice beat
+ * an OS set to dark. Both directions of the toggle therefore win over the OS.
+ *
+ * `scripts/check-theme-parity.mjs` asserts the two blocks declare the same tokens
+ * with the same values, so the duplication cannot silently drift.
+ */
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+
+    --primary: #8b83f5;
+    --primary-light: #26244a;
+    --primary-border: #3b3878;
+    --primary-text: #c7c2fb;
+
+    --page-bg: #121211;
+    --card-bg: #1a1a19;
+    --card-header-bg: #1a1a19;
+    --card-body-bg: #1a1a19;
+    --header-bg: #1a1a19;
+    --track: #242422;
+
+    --border: #2e2e2b;
+    --border-solid: #3a3a37;
+    --border-hover: #4a4a46;
+
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #9a9990;
+    --text-hint: #77766e;
+
+    --error-red: #f87171;
+    --error-bg: #2a1616;
+    --error-border: #5a2626;
+
+    --warn-bg: #2a2110;
+    --warn-border: #5c4a1c;
+    --warn-text: #f5c86b;
+
+    --ink-up: #e8756f;
+
+    --chart-surface: #1a1a19;
+    --grid-line: #2a2a27;
+    --axis-line: #4a4a46;
+    --ink-muted: #8b8a82;
+    --hatch-line: #33332f;
+
+    --seq-550: #6da7ec;
+    --seq-700: #9ec5f4;
+
+    --div-pos-3: #ea9a94;
+    --div-pos-2: #d75853;
+    --div-pos-1: #892b2a;
+    --div-mid: #383835;
+    --div-neg-1: #184f95;
+    --div-neg-2: #3987e5;
+    --div-neg-3: #86b6ef;
+
+    --ink-on-div-0: #ffffff;
+    --ink-on-div-1: #ffffff;
+    --ink-on-div-2: #10151c;
+    --ink-on-div-3: #10151c;
+
+    --cell-missing-bg: #1a1a19;
+    --cell-missing-ink: #5a594f;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+
+    --tooltip-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+    --scrim: rgba(0, 0, 0, 0.35);
+    --shimmer-a: #232321;
+    --shimmer-b: #2d2d2a;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --primary: #8b83f5;
+  --primary-light: #26244a;
+  --primary-border: #3b3878;
+  --primary-text: #c7c2fb;
+
+  --page-bg: #121211;
+  --card-bg: #1a1a19;
+  --card-header-bg: #1a1a19;
+  --card-body-bg: #1a1a19;
+  --header-bg: #1a1a19;
+  --track: #242422;
+
+  --border: #2e2e2b;
+  --border-solid: #3a3a37;
+  --border-hover: #4a4a46;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #9a9990;
+  --text-hint: #77766e;
+
+  --error-red: #f87171;
+  --error-bg: #2a1616;
+  --error-border: #5a2626;
+
+  --warn-bg: #2a2110;
+  --warn-border: #5c4a1c;
+  --warn-text: #f5c86b;
+
+  --ink-up: #e8756f;
+
+  --chart-surface: #1a1a19;
+  --grid-line: #2a2a27;
+  --axis-line: #4a4a46;
+  --ink-muted: #8b8a82;
+  --hatch-line: #33332f;
+
+  --seq-550: #6da7ec;
+  --seq-700: #9ec5f4;
+
+  --div-pos-3: #ea9a94;
+  --div-pos-2: #d75853;
+  --div-pos-1: #892b2a;
+  --div-mid: #383835;
+  --div-neg-1: #184f95;
+  --div-neg-2: #3987e5;
+  --div-neg-3: #86b6ef;
+
+  --ink-on-div-0: #ffffff;
+  --ink-on-div-1: #ffffff;
+  --ink-on-div-2: #10151c;
+  --ink-on-div-3: #10151c;
+
+  --cell-missing-bg: #1a1a19;
+  --cell-missing-ink: #5a594f;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+
+  --tooltip-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.35);
+  --shimmer-a: #232321;
+  --shimmer-b: #2d2d2a;
 }
 
 * {
@@ -156,6 +346,16 @@ body {
 body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--text-primary);
+  /*
+   * The page background belongs HERE, not only on the React root.
+   *
+   * It was previously applied in App.tsx alone, which left the document itself
+   * UA-default white. On a light theme that is invisible; on a dark one it is
+   * two visible defects - a white frame flashes before hydration, and the
+   * overscroll/rubber-band gutter past either end of the page stays white while
+   * the app is black.
+   */
+  background: var(--page-bg);
   font-size: 13px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -163,6 +363,48 @@ body {
 
 #root {
   height: 100%;
+}
+
+/* The UA default selection blue is harsh on a dark surface and fights the
+   accent; tie it to the chrome hue instead, in both themes. */
+::selection {
+  background: var(--primary-light);
+  color: var(--primary-text);
+}
+
+/*
+ * Scrollbars. This dashboard is mostly scroll containers - the heatmap, every
+ * table, the Data tab - so leaving them UA-default would put light scrollbars
+ * down the side of every dark panel.
+ */
+* {
+  scrollbar-color: var(--border-hover) transparent;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-hint);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Tabular figures only where columns must align vertically. */
@@ -191,7 +433,12 @@ body {
 }
 
 .shimmer {
-  background-image: linear-gradient(90deg, #eceef1 0%, #f6f7f8 50%, #eceef1 100%);
+  background-image: linear-gradient(
+    90deg,
+    var(--shimmer-a) 0%,
+    var(--shimmer-b) 50%,
+    var(--shimmer-a) 100%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 4px;

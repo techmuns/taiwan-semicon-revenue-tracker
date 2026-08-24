@@ -195,7 +195,20 @@ function StagePanel({
           {s.bucket}
         </span>
         <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5, flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: "var(--text-hint)" }}>
+          {/* These two numbers legitimately differ and the difference used to be
+              unexplained: this is every name in the stage, while the table's
+              Names column is the CONSTANT-MEMBERSHIP count - only those with
+              revenue in both the base month and that month. Analog Cycle reads
+              5 here and 4 there because 6286 has no filing obligation at all. */}
+          <span
+            style={{ fontSize: 10, color: "var(--text-hint)" }}
+            title={
+              `${s.totalMembers} name${s.totalMembers === 1 ? "" : "s"} in this stage. ` +
+              `The index itself is built on constant membership, so a month counts ` +
+              `only the names with revenue in both it and the base month - that ` +
+              `count is the table view's second column, and can be lower.`
+            }
+          >
             {s.totalMembers} name{s.totalMembers === 1 ? "" : "s"}
           </span>
           {last !== null && (

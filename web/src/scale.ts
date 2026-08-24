@@ -34,15 +34,27 @@ const FILL: Record<Exclude<Band, null>, string> = {
   3: "var(--div-pos-3)",
 };
 
-/** White only on the two darkest bands; measured contrast, not taste. */
+/**
+ * Ink per band; measured contrast, not taste - and it has to be a TOKEN rather
+ * than a literal, because which end needs light ink flips with the theme.
+ *
+ * In light the fills darken outward, so only |band| 3 takes white (8.1:1, 8.6:1)
+ * and everything else takes the text ink. In dark the diverging ramp inverts -
+ * the midpoint sits just above the surface and the extremes are the lightest
+ * steps - so it is bands 0 and 1 that take white, while 2 and 3 take dark ink.
+ * The old `#ffffff` literal would have printed white on a pale blue cell.
+ *
+ * Four tokens, not seven: the arms are lightness-mirrored by construction, so
+ * the sign cannot change the answer. Keyed by |band| for exactly that reason.
+ */
 const INK: Record<Exclude<Band, null>, string> = {
-  [-3]: "#ffffff",
-  [-2]: "var(--text-primary)",
-  [-1]: "var(--text-primary)",
-  0: "var(--text-primary)",
-  1: "var(--text-primary)",
-  2: "var(--text-primary)",
-  3: "#ffffff",
+  [-3]: "var(--ink-on-div-3)",
+  [-2]: "var(--ink-on-div-2)",
+  [-1]: "var(--ink-on-div-1)",
+  0: "var(--ink-on-div-0)",
+  1: "var(--ink-on-div-1)",
+  2: "var(--ink-on-div-2)",
+  3: "var(--ink-on-div-3)",
 };
 
 /**

@@ -18,7 +18,67 @@
 
 import { Segmented, TickerPill } from "./controls";
 import { freshnessLabel } from "../format";
+import { useTheme } from "../theme";
 import type { Meta } from "../types";
+
+/**
+ * The theme switch.
+ *
+ * A bulb, lit when the dark theme is on. Icon-only, but never color-only: it
+ * carries an aria-label that names the DESTINATION rather than the current state
+ * ("Switch to dark theme"), which is what a screen-reader user needs to decide
+ * whether to press it, plus aria-pressed for the state itself.
+ *
+ * Sized and bordered exactly like the Lock button beside it - 26px, hairline
+ * border, 6px radius - so it joins the existing control row rather than
+ * announcing itself as a new kind of thing.
+ */
+function ThemeToggle() {
+  const { theme, toggle } = useTheme();
+  const dark = theme === "dark";
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-pressed={dark}
+      aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+      title={dark ? "Switch to light theme" : "Switch to dark theme"}
+      style={{
+        height: "var(--control-h)",
+        width: "var(--control-h)",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+        color: dark ? "var(--status-warning)" : "var(--text-muted)",
+        background: "var(--card-bg)",
+        border: "1px solid var(--border-solid)",
+        borderRadius: "var(--radius-control)",
+        cursor: "pointer",
+        transition: "var(--ease)",
+        flexShrink: 0,
+      }}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        fill={dark ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {/* Glass, then the base band and contact - a bulb reads as a bulb only
+            with the screw base, and the filled glass is the "on" signal. */}
+        <path d="M9 18h6" />
+        <path d="M10 21h4" />
+        <path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z" />
+      </svg>
+    </button>
+  );
+}
 
 export const TABS = [
   { value: "overview", label: "Overview", title: "Where the chain is inflecting" },
@@ -152,10 +212,16 @@ export function Header({
           </span>
         )}
         {meta?.latest_month && (
-          <span title={`data last written ${lastSeen ?? "unknown"}`}>
+          <span
+            title={`data last written ${lastSeen ?? "unknown"}`}
+            // The first thing to give up width on a narrow viewport: it is the
+            // only item here that is prose rather than a control.
+            style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
+          >
             latest {meta.latest_month} · {freshnessLabel(lastSeen, now)}
           </span>
         )}
+        <ThemeToggle />
         <a
           href={exportHref}
           style={{

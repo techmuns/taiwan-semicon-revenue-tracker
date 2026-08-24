@@ -423,6 +423,55 @@ Rules the implementation holds to:
   per-month **constant-membership count** as a second column, so a month that is
   thin rather than weak is visible rather than inferred.
 
+### Light and dark
+
+The bulb in the header switches theme. Three rules make it behave:
+
+- **Absent means follow the OS.** Only an explicit choice is stored, so a
+  first-time visitor gets whatever their machine already asked for. The bulb then
+  writes `twrev_theme` to `localStorage`, and that wins over the OS in *both*
+  directions — the `:not([data-theme="light"])` guard in `tokens.css` is what lets
+  an explicit light choice beat an OS set to dark.
+- **Theme is deliberately NOT in the URL.** Every other piece of view state is,
+  so a view can be sent to someone and arrive identical. Theme is a property of
+  the *reader*, not the view: a link carrying it would impose your theme on
+  whoever opened it.
+- **No flash.** A blocking inline script in `index.html` stamps the attribute
+  before first paint. The bundle is deferred, so without it a dark-theme reader
+  would get one white frame on every navigation.
+
+**The dark palette is selected, not flipped.** Its steps were chosen for the dark
+surface and validated against it — reusing the light hexes *fails* the palette
+validator (orange `#eb6834` sits at OKLCH L 0.671, outside the dark lightness
+band). The three series slots pass every check in both modes, and in dark they
+also clear 3:1, which retires the aqua contrast WARN that light mode carries.
+
+The diverging heatmap **inverts**. In light, magnitude reads as darkness: the
+midpoint is the lightest step and the extremes are darkest. On a dark surface
+near-zero must recede toward the *surface*, so the ramp turns over — midpoint
+`#383835`, extremes lightest. The arms stay OKLCH lightness-mirrored (the one new
+value, `#ea9a94`, was computed as the mirror of `seq-250` at the categorical-red
+hue, the same method the light red arm used).
+
+That inversion drags the ink with it, which is why `scale.ts` now reads
+`--ink-on-div-0..3` instead of a hardcoded `#ffffff`:
+
+| Mode | bands 0, ±1 | ±2 | ±3 |
+|---|---|---|---|
+| Light | dark ink | dark ink | **white** |
+| Dark | **white** | dark ink | dark ink |
+
+The old literal would have printed white on a pale blue cell.
+
+The dark tokens are declared under two scopes (a media query for the OS, an
+attribute selector for the toggle) because CSS cannot fold a media query into a
+selector list. `web/scripts/check-theme-parity.mjs` asserts the two blocks declare
+the same tokens with the same values, so the duplication cannot drift:
+
+```bash
+node web/scripts/check-theme-parity.mjs
+```
+
 ---
 
 ## API

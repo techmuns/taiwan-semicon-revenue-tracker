@@ -201,7 +201,7 @@ export function AsyncBody<T>({
           style={{
             position: "absolute",
             inset: 0,
-            background: "rgba(255,255,255,0.35)",
+            background: "var(--scrim)",
             pointerEvents: "none",
           }}
         />
