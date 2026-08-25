@@ -39,6 +39,13 @@ export interface WidgetCardProps {
   collapsible?: boolean;
   /** Only meaningful with `collapsible`. Defaults to closed. */
   defaultOpen?: boolean;
+  /**
+   * Take the card's natural height instead of stretching to the row. For a card
+   * whose content is genuinely short - an identity strip, an empty state - where
+   * stretching would draw a tall box mostly full of nothing. Use sparingly: a
+   * row of stretched cards is the tidier default, and this opts one out of it.
+   */
+  fit?: boolean;
   children: ReactNode;
 }
 
@@ -52,10 +59,12 @@ export function WidgetCard({
   bodyStyle,
   collapsible,
   defaultOpen = false,
+  fit,
   children,
 }: WidgetCardProps) {
   const [open, setOpen] = useState(defaultOpen);
   const folded = collapsible && !open;
+  const natural = folded || fit;
   return (
     <div
       className={`widget-card${staticCard ? " widget-card--static" : ""}`}
@@ -67,8 +76,8 @@ export function WidgetCard({
         // with a header stranded at the top of it. `height` has to be overridden
         // too: .widget-card carries `height: 100%` to fill a stretched track,
         // and that wins over alignSelf on its own.
-        alignSelf: folded ? "start" : undefined,
-        height: folded ? "auto" : undefined,
+        alignSelf: natural ? "start" : undefined,
+        height: natural ? "auto" : undefined,
       }}
     >
       <div

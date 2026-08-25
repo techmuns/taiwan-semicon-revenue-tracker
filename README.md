@@ -59,7 +59,10 @@ UTF-8 end to end.
 
 `raw_revenue` holds the scrape unmodified, keyed `(source_id, month, ticker)`, so
 every derived number has an as-filed row behind it and cross-source disagreement
-is detectable rather than averaged away. Restatements append to
+would be detectable rather than averaged away. In practice nothing currently
+writes two sources for one cell: the two OpenAPI feeds that carry the universe
+partition it (上市 vs 上櫃, 31 names and 5), and the MOPS repair pass only runs
+for names the feeds missed. The key supports the check; no data exercises it. Restatements append to
 `raw_revenue_history`; a superseded row is kept, never overwritten.
 
 `analytics_monthly` is a **view**, not a copy, so it cannot drift from the raw
@@ -122,7 +125,7 @@ sent to someone else and arrive identical.
 | Company | One name: series, and the as-filed rows every number came from |
 | Buckets | Rebased revenue index per stage, ten facets on one shared scale |
 | Data | The twelve columns, sortable, identical to the CSV export |
-| Quality | Coverage, findings, interior gaps, cross-source agreement |
+| Quality | Coverage, automated findings, and the coverage matrix (which flags interior gaps) |
 
 Every chart can be **redrawn as a table of numbers** — one toggle per screen,
 graph by default, `viz=table` in the URL when it isn't. It exists because a

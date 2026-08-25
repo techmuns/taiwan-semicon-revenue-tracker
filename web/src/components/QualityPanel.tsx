@@ -29,7 +29,7 @@ const SEVERITY_LEVEL: Record<string, "good" | "warning" | "serious" | "critical"
 };
 
 export function QualityPanel({ quality }: { quality: Quality }) {
-  const { coverage, matrix, interior_gaps, findings, multi_source_cells } = quality;
+  const { coverage, matrix, interior_gaps, findings } = quality;
   const months = [...new Set(matrix.map((c) => c.month))].sort();
   const byTicker = groupBy(matrix, (c) => c.ticker);
   const rows = [...byTicker.entries()].sort((a, b) => {
@@ -46,8 +46,23 @@ export function QualityPanel({ quality }: { quality: Quality }) {
 
   return (
     <>
-      <WidgetCard title="Coverage" subtitle="Company-months with a filing on record">
-        <div style={{ padding: "11px 12px 12px" }}>
+      <WidgetCard
+        full
+        fit
+        title="Coverage"
+        subtitle="Company-months with a filing on record"
+      >
+        {/* One short stat, so it sets across the row like the Summary strip
+            rather than as a column with a screen of nothing under it. */}
+        <div
+          style={{
+            padding: "11px 14px 12px",
+            display: "flex",
+            alignItems: "baseline",
+            flexWrap: "wrap",
+            gap: "6px 28px",
+          }}
+        >
           <div
             className="tnum"
             style={{
@@ -59,19 +74,19 @@ export function QualityPanel({ quality }: { quality: Quality }) {
           >
             {coverage.trackable_pct === null ? "—" : `${coverage.trackable_pct.toFixed(1)}%`}
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--text-hint)", marginTop: 3 }}>
+          <div style={{ fontSize: 10.5, color: "var(--text-hint)" }}>
             {coverage.trackable_with_data.toLocaleString("en-US")} of{" "}
             {coverage.trackable_cells.toLocaleString("en-US")} cells that were expected to have a
             filing
           </div>
           <div
             style={{
-              marginTop: 10,
-              paddingTop: 10,
-              borderTop: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "baseline",
+              flexWrap: "wrap",
+              gap: "2px 20px",
               fontSize: 11,
               color: "var(--text-muted)",
-              lineHeight: 1.6,
             }}
           >
             <div>
@@ -82,7 +97,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
               of {coverage.cells.toLocaleString("en-US")}
             </div>
             {coverage.known_absent.length > 0 && (
-              <div style={{ marginTop: 4 }}>
+              <div>
                 {coverage.known_absent.length} cell
                 {coverage.known_absent.length === 1 ? "" : "s"} known-absent by design (
                 {[...new Set(coverage.known_absent.map((k) => k.ticker))].join(", ")})
@@ -93,7 +108,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
       </WidgetCard>
 
       <WidgetCard
-        wide
+        full
         title="Findings"
         subtitle="Automated checks, most severe first"
         staticCard
@@ -152,48 +167,49 @@ export function QualityPanel({ quality }: { quality: Quality }) {
       </WidgetCard>
 
       <WidgetCard
-        title="Interior gaps"
-        subtitle="A month with no filing between two months that have one"
-        staticCard
-      >
-        {interior_gaps.length === 0 ? (
-          <EmptyState
-            icon="✓"
-            message="No interior gaps"
-            hint="Every company's series is contiguous. A trailing gap would be a delisting suspect, not a gap."
-          />
-        ) : (
-          <div style={{ maxHeight: 240, overflow: "auto" }}>
-            {interior_gaps.map((g, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "5px 14px",
-                  borderBottom: "1px solid var(--border)",
-                  fontSize: 11,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                }}
-              >
-                <span style={{ color: "var(--text-secondary)" }}>
-                  {g.display_name}{" "}
-                  <span style={{ color: "var(--text-hint)" }}>{g.ticker}</span>
-                </span>
-                <span style={{ color: "var(--text-muted)" }}>{g.month}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </WidgetCard>
-
-      <WidgetCard
+        full
         title="Coverage matrix"
         subtitle="Filed · not filed · no obligation — three states, not two"
-        wide
         staticCard
         bodyStyle={{ overflow: "hidden" }}
       >
+        {/*
+         * Interior gaps used to be a card of their own, which meant the reader
+         * was told "no gaps" on a screen that already showed every cell. A hole
+         * IS the matrix, so the warning belongs on it: when there is nothing to
+         * say, the grid saying it by looking clean is the better answer, and
+         * this strip does not render at all.
+         */}
+        {interior_gaps.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              flexWrap: "wrap",
+              gap: "2px 8px",
+              padding: "7px 14px",
+              borderBottom: "1px solid var(--border-solid)",
+              background: "var(--error-bg)",
+              fontSize: 11,
+              color: "var(--text-secondary)",
+            }}
+          >
+            <strong>
+              {interior_gaps.length} interior gap
+              {interior_gaps.length === 1 ? "" : "s"}
+            </strong>
+            <span style={{ color: "var(--text-muted)" }}>
+              — a filed month is missing between two months that filed, so the fetch
+              failed rather than the company. Month-over-month and year-to-date are
+              wrong from here on for:
+            </span>
+            <span style={{ color: "var(--text-primary)" }}>
+              {interior_gaps
+                .map((g) => `${g.display_name} ${g.ticker} · ${g.month}`)
+                .join(" | ")}
+            </span>
+          </div>
+        )}
         <div style={{ overflow: "auto", maxHeight: 420 }}>
           <table
             style={{
@@ -202,6 +218,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
               width: "100%",
               fontSize: 11,
               background: "var(--chart-surface)",
+              tableLayout: "fixed",
             }}
           >
             <thead>
@@ -221,7 +238,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
                     textTransform: "uppercase",
                     color: "var(--ink-muted)",
                     borderBottom: "1px solid var(--grid-line)",
-                    minWidth: 190,
+                    width: 220,
                   }}
                 >
                   Company
@@ -355,52 +372,6 @@ export function QualityPanel({ quality }: { quality: Quality }) {
             </span>
           ))}
         </div>
-      </WidgetCard>
-
-      <WidgetCard
-        wide
-        title="Cross-source agreement"
-        subtitle="Company-months carried by two or more feeds"
-        staticCard
-      >
-        {multi_source_cells.length === 0 ? (
-          <EmptyState
-            message="No overlapping cells"
-            hint="Each company-month came from exactly one feed, so there is nothing to cross-check against."
-          />
-        ) : (
-          <div style={{ maxHeight: 260, overflow: "auto" }}>
-            <div
-              style={{
-                padding: "6px 14px",
-                fontSize: 11,
-                color: "var(--text-muted)",
-                borderBottom: "1px solid var(--border)",
-              }}
-            >
-              {multi_source_cells.length} cells confirmed by two or more independent surfaces. Any
-              disagreement on the integer levels would appear as an error finding above.
-            </div>
-            {multi_source_cells.map((c, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "4px 14px",
-                  borderBottom: "1px solid var(--border)",
-                  fontSize: 11,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                }}
-              >
-                <span style={{ color: "var(--text-secondary)" }}>
-                  {c.ticker} · {c.month}
-                </span>
-                <span style={{ color: "var(--text-hint)" }}>{c.source_ids}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </WidgetCard>
     </>
   );

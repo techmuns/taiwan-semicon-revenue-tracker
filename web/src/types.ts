@@ -231,13 +231,6 @@ export interface FetchLogRow {
   last_fetch_utc: string | null;
 }
 
-export interface MultiSourceCell {
-  ticker: string;
-  month: string;
-  sources: number;
-  source_ids: string;
-}
-
 export interface Quality {
   coverage: {
     cells: number;
@@ -252,5 +245,4 @@ export interface Quality {
   interior_gaps: InteriorGap[];
   findings: Finding[];
   fetch_log: FetchLogRow[];
-  multi_source_cells: MultiSourceCell[];
 }

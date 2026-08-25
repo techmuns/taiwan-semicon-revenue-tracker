@@ -65,14 +65,15 @@ export function CompanyPanel({ detail, viz }: { detail: CompanyDetail; viz: View
       <WidgetCard
         title={`${company.display_name} · ${company.ticker}`}
         {...(company.name_zh ? { subtitle: company.name_zh } : {})}
-        wide
+        full
+        fit
       >
         <div
           style={{
             padding: "12px 16px",
             display: "grid",
             gap: 12,
-            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, max-content))",
           }}
         >
           <Field label="Stage">{company.bucket}</Field>
@@ -112,6 +113,7 @@ export function CompanyPanel({ detail, viz }: { detail: CompanyDetail; viz: View
       </WidgetCard>
 
       <WidgetCard
+        wide
         title="Monthly revenue"
         subtitle="As filed, NT$ · a hatched stub means no filing"
       >
@@ -152,6 +154,7 @@ export function CompanyPanel({ detail, viz }: { detail: CompanyDetail; viz: View
       </WidgetCard>
 
       <WidgetCard
+        wide
         title="Growth rates"
         subtitle="One axis, all in percent · a gap means no comparable"
       >
@@ -400,6 +403,7 @@ export function CompanyPanel({ detail, viz }: { detail: CompanyDetail; viz: View
         title="Restatements"
         subtitle="Later-revised filings · superseded rows are kept, never overwritten"
         staticCard
+        fit={restatements.length === 0}
       >
         {restatements.length === 0 ? (
           <EmptyState

@@ -545,7 +545,14 @@ inside the 0.05pp tolerance and **not** raise a finding), `cumulative_ytd
 2872064238`, `cumulative_yoy_pct 37.01`.
 
 Because those two come from different endpoints, agreeing on the shared series
-is itself the cross-source proof.
+is itself the cross-source proof. Note this is a proof done **by hand, once**:
+there is no standing cross-source check in the dashboard, because no ticker is
+ever carried by two feeds. `t187ap05_L` (上市) covers 31 of the universe and
+`mopsfin_t187ap05_O` (上櫃) covers the other 5, and a company is one or the
+other; `t187ap05_P`, the brief's specified feed, carries none of them. The MOPS
+repair pass only fetches names the feeds missed. Verified live 2026-08-25: zero
+tickers appear in more than one feed. A standing check would need a deliberate
+spot-check fetch of names a feed already covered.
 
 Then:
 

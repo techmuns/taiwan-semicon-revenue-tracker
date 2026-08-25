@@ -558,26 +558,49 @@ async function companyDetail(env: Env, ticker: string) {
 
 // ----------------------------------------------------------------- /quality --
 
+/*
+ * There is no cross-source-agreement query here any more, and adding one back
+ * would produce an empty result by construction. The two OpenAPI feeds that
+ * carry our universe are t187ap05_L (上市, 31 of the 37) and mopsfin_t187ap05_O
+ * (上櫃, the other 5): a Taiwanese company is listed or OTC, never both, so the
+ * feeds partition the universe rather than overlapping it. Verified live
+ * 2026-08-25 - zero tickers appear in more than one feed. The MOPS repair pass
+ * only runs for names the feeds MISSED, so it cannot create a second source
+ * either. Two sources for one (ticker, month) would need a deliberate spot-check
+ * fetch that does not exist yet.
+ */
 async function quality(env: Env) {
-  const [coverage, gaps, findings, log, dupes] = await env.DB.batch<any>([
+  const [coverage, gaps, findings, log] = await env.DB.batch<any>([
     // The coverage matrix, straight off the grid the view already builds.
     env.DB.prepare(
       `SELECT ticker, display_name, bucket, tier, status, month, has_data, source_id
          FROM analytics_base ORDER BY sort_order, ticker, month_idx`,
     ),
-    // Interior gaps: a month with no data that has data on BOTH sides. Trailing
-    // absence is a pending filing; a hole in the middle is a defect.
+    /*
+     * Interior gaps: a month with no data that has data SOMEWHERE before it and
+     * SOMEWHERE after it. Trailing absence is a pending filing and leading
+     * absence is a company that joined the window late; neither is a defect.
+     *
+     * This used to compare against LAG/LEAD by one month, which meant it only
+     * ever found a hole exactly one month wide. Two consecutive missing months
+     * disqualified each other - the first one's next month is empty, the second
+     * one's previous month is empty - so a longer outage, the worse failure,
+     * reported clean. Bounding against each ticker's first and last filed month
+     * instead makes the gap's length irrelevant.
+     */
     env.DB.prepare(
-      `WITH g AS (
-         SELECT ticker, display_name, status, month, month_idx, has_data,
-                LAG(has_data)  OVER w AS prev_has,
-                LEAD(has_data) OVER w AS next_has
-           FROM analytics_base
-           WINDOW w AS (PARTITION BY ticker ORDER BY month_idx)
+      `WITH r AS (
+         SELECT ticker,
+                MIN(CASE WHEN has_data = 1 THEN month_idx END) AS first_idx,
+                MAX(CASE WHEN has_data = 1 THEN month_idx END) AS last_idx
+           FROM analytics_base GROUP BY ticker
        )
-       SELECT ticker, display_name, status, month FROM g
-        WHERE has_data = 0 AND prev_has = 1 AND next_has = 1
-        ORDER BY ticker, month_idx`,
+       SELECT b.ticker, b.display_name, b.status, b.month
+         FROM analytics_base b JOIN r ON r.ticker = b.ticker
+        WHERE b.has_data = 0
+          AND b.month_idx > r.first_idx
+          AND b.month_idx < r.last_idx
+        ORDER BY b.ticker, b.month_idx`,
     ),
     env.DB.prepare(
       `SELECT run_id, created_at_utc, severity, code, month, ticker, source_id, message
@@ -591,15 +614,6 @@ async function quality(env: Env) {
               SUM(ok) AS ok_n, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS fail_n,
               MAX(fetched_at_utc) AS last_fetch_utc
          FROM fetch_log GROUP BY source_id, month ORDER BY month, source_id`,
-    ),
-    // Where two surfaces both hold a (ticker, month): the rows the cross-source
-    // check compares. More than one source is expected and healthy - the view
-    // picks by precedence - but it should never be a surprise.
-    env.DB.prepare(
-      `SELECT ticker, month, COUNT(DISTINCT source_id) AS sources,
-              GROUP_CONCAT(DISTINCT source_id) AS source_ids
-         FROM raw_revenue GROUP BY ticker, month HAVING sources > 1
-        ORDER BY month, ticker`,
     ),
   ]);
 
@@ -628,7 +642,6 @@ async function quality(env: Env) {
     interior_gaps: gaps.results,
     findings: findings.results,
     fetch_log: log.results,
-    multi_source_cells: dupes.results,
   };
 }
 
