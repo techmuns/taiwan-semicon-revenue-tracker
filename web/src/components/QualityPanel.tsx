@@ -11,6 +11,11 @@
  *   no obligation - no row, and none was expected (this is not)
  *
  * Collapsing the last two into "missing" is what makes a data problem invisible.
+ *
+ * There is no headline coverage percentage any more. "100.0%, 288 of 288" is a
+ * number an operator checks after a run, not something a reader of revenue asks
+ * for, and the matrix below it already shows every cell it summarised. The
+ * figure is still on /api/quality for the runbook's post-deploy check.
  */
 
 import { WidgetCard } from "./WidgetCard";
@@ -29,7 +34,7 @@ const SEVERITY_LEVEL: Record<string, "good" | "warning" | "serious" | "critical"
 };
 
 export function QualityPanel({ quality }: { quality: Quality }) {
-  const { coverage, matrix, interior_gaps, findings } = quality;
+  const { matrix, interior_gaps, findings } = quality;
   const months = [...new Set(matrix.map((c) => c.month))].sort();
   const byTicker = groupBy(matrix, (c) => c.ticker);
   const rows = [...byTicker.entries()].sort((a, b) => {
@@ -46,67 +51,6 @@ export function QualityPanel({ quality }: { quality: Quality }) {
 
   return (
     <>
-      <WidgetCard
-        full
-        fit
-        title="Coverage"
-        subtitle="Company-months with a filing on record"
-      >
-        {/* One short stat, so it sets across the row like the Summary strip
-            rather than as a column with a screen of nothing under it. */}
-        <div
-          style={{
-            padding: "11px 14px 12px",
-            display: "flex",
-            alignItems: "baseline",
-            flexWrap: "wrap",
-            gap: "6px 28px",
-          }}
-        >
-          <div
-            className="tnum"
-            style={{
-              fontSize: 19,
-              fontWeight: 600,
-              lineHeight: 1.2,
-              letterSpacing: "-0.015em",
-            }}
-          >
-            {coverage.trackable_pct === null ? "—" : `${coverage.trackable_pct.toFixed(1)}%`}
-          </div>
-          <div style={{ fontSize: 10.5, color: "var(--text-hint)" }}>
-            {coverage.trackable_with_data.toLocaleString("en-US")} of{" "}
-            {coverage.trackable_cells.toLocaleString("en-US")} cells that were expected to have a
-            filing
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              flexWrap: "wrap",
-              gap: "2px 20px",
-              fontSize: 11,
-              color: "var(--text-muted)",
-            }}
-          >
-            <div>
-              Including names with no filing obligation:{" "}
-              <strong className="tnum">
-                {coverage.pct === null ? "—" : `${coverage.pct.toFixed(1)}%`}
-              </strong>{" "}
-              of {coverage.cells.toLocaleString("en-US")}
-            </div>
-            {coverage.known_absent.length > 0 && (
-              <div>
-                {coverage.known_absent.length} cell
-                {coverage.known_absent.length === 1 ? "" : "s"} known-absent by design (
-                {[...new Set(coverage.known_absent.map((k) => k.ticker))].join(", ")})
-              </div>
-            )}
-          </div>
-        </div>
-      </WidgetCard>
-
       <WidgetCard
         full
         title="Findings"
