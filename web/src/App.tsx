@@ -44,7 +44,18 @@ const GRID: CSSProperties = {
   display: "grid",
   gap: "var(--grid-gap)",
   gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-  alignItems: "start",
+  /*
+   * STRETCH, not start.
+   *
+   * `start` gave every card its natural height, so a row of three cards whose
+   * content happened to differ - a 6-line summary beside a 20-row list beside a
+   * one-line empty state - came out as three different heights with ragged
+   * whitespace between them. That is the single thing that made every tab look
+   * unfinished. Stretching makes each row a clean band; the cards already
+   * flex-column with a `flex: 1` body, so the extra height lands in the body
+   * rather than stranding the header.
+   */
+  alignItems: "stretch",
 };
 
 /**

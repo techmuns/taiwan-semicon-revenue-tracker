@@ -255,7 +255,7 @@ export function ChipSet({
   selected,
   onToggle,
   onClear,
-  emptyMeans = "all",
+  emptyMeans = "all",  // the whole phrase - see the render below
 }: {
   options: readonly { value: string; label: string; title?: string }[];
   selected: readonly string[];
@@ -311,7 +311,11 @@ export function ChipSet({
         </button>
       ) : (
         <span style={{ fontSize: 11, color: "var(--text-hint)" }}>
-          {selected.length === 0 ? `all ${emptyMeans}` : ""}
+          {/* `emptyMeans` is the WHOLE phrase, not a noun to be prefixed. It used
+              to be interpolated as `all ${emptyMeans}`, which rendered the
+              callers' "all stages" as "all all stages" and "both tiers" as
+              "all both tiers". */}
+          {selected.length === 0 ? emptyMeans : ""}
         </span>
       )}
     </div>

@@ -62,6 +62,13 @@ export function WidgetCard({
       style={{
         gridColumn: full ? "1 / -1" : wide ? "span 2" : undefined,
         minWidth: 0,
+        // The grid stretches its rows, which is right for a card with content.
+        // A FOLDED card has none, so stretching it would draw a tall empty box
+        // with a header stranded at the top of it. `height` has to be overridden
+        // too: .widget-card carries `height: 100%` to fill a stretched track,
+        // and that wins over alignSelf on its own.
+        alignSelf: folded ? "start" : undefined,
+        height: folded ? "auto" : undefined,
       }}
     >
       <div
@@ -84,7 +91,14 @@ export function WidgetCard({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          minHeight: 38,
+          /*
+           * One height for every card header, whether or not it has a subtitle.
+           * At 38 a title-only header sat ~8px shorter than its neighbours, so
+           * across a row of cards the title baselines stepped up and down and
+           * the body rules never lined up. 46 is the two-line height, so the
+           * one-line headers pad to match instead of the other way round.
+           */
+          minHeight: 46,
           padding: "8px 12px",
           // A folded card has no body, so its header border would be a rule
           // under nothing.

@@ -100,7 +100,12 @@ function MoverList({
                   ...style,
                   padding: "5px 10px",
                   textAlign: "right",
-                  width: 78,
+                  // 78 was one character too narrow: a three-digit value like
+                  // "+166.4 ppt" wrapped onto a second line while "-8.9 ppt" did
+                  // not, so rows in the same list came out at two different
+                  // heights. nowrap makes that impossible rather than unlikely.
+                  width: 92,
+                  whiteSpace: "nowrap",
                   fontWeight: 600,
                 }}
                 title="Change in the YoY rate vs the prior month"

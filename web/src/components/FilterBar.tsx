@@ -33,12 +33,22 @@ export function FilterBar({
     list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
 
   return (
+    /*
+     * TWO ROWS, not one wrapping row.
+     *
+     * The stage filter has ten chips whose labels run to 30 characters
+     * ("Legacy / Mature Node Control Group"). Sharing one flex line with the
+     * month pickers, the tier chips, the toggle and the row count meant it was
+     * handed whatever width was left and wrapped into three ragged lines of
+     * different lengths, with the STAGE label stranded against the middle of the
+     * block. Giving it its own full-width row lets it wrap evenly, and puts the
+     * short controls on one tidy line above it.
+     */
     <div
       style={{
         display: "flex",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: 14,
+        flexDirection: "column",
+        gap: 8,
         padding: "8px 12px",
         marginBottom: "var(--grid-gap)",
         background: "var(--card-bg)",
@@ -46,6 +56,15 @@ export function FilterBar({
         borderRadius: "var(--radius-card)",
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 14,
+          minHeight: "var(--control-h)",
+        }}
+      >
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
         <Label>Months</Label>
         <MonthSelect
@@ -78,17 +97,6 @@ export function FilterBar({
         />
       </span>
 
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flex: 1, minWidth: 280 }}>
-        <Label>Stage</Label>
-        <ChipSet
-          options={buckets.map((b) => ({ value: b, label: b }))}
-          selected={filters.buckets}
-          onToggle={(v) => onChange({ ...filters, buckets: toggle(filters.buckets, v) })}
-          onClear={() => onChange({ ...filters, buckets: [] })}
-          emptyMeans="all stages"
-        />
-      </span>
-
       <Toggle
         checked={filters.onlyWithData}
         onChange={(v) => onChange({ ...filters, onlyWithData: v })}
@@ -107,6 +115,30 @@ export function FilterBar({
           </>
         )}
       </span>
+      </div>
+
+      {/* Row two: the stage chips, full width, with the label aligned to the
+          FIRST line rather than floating against the middle of a wrapped block. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 8,
+          borderTop: "1px solid var(--border)",
+          paddingTop: 8,
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", height: 22, flexShrink: 0 }}>
+          <Label>Stage</Label>
+        </span>
+        <ChipSet
+          options={buckets.map((b) => ({ value: b, label: b }))}
+          selected={filters.buckets}
+          onToggle={(v) => onChange({ ...filters, buckets: toggle(filters.buckets, v) })}
+          onClear={() => onChange({ ...filters, buckets: [] })}
+          emptyMeans="all stages"
+        />
+      </div>
     </div>
   );
 }

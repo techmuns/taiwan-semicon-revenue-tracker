@@ -364,13 +364,26 @@ export function CompanyPanel({ detail, viz }: { detail: CompanyDetail; viz: View
                   >
                     {pct(num(r["src_cum_yoy_pct"]), 2)}
                   </td>
+                  {/*
+                    ONE LINE, ELLIPSISED - the full text is the tooltip.
+
+                    This wrapped freely at maxWidth 220, and a filer's 備註 can
+                    run to a paragraph. One long note made its row four times the
+                    height of every other, so the table read as a set of
+                    mismatched blocks rather than rows. An as-filed audit table's
+                    job is to line figures up; the prose is the one thing in it
+                    that does not need to be read at a glance.
+                  */}
                   <td
+                    title={typeof r["note"] === "string" ? r["note"] : undefined}
                     style={{
                       padding: "4px 8px",
                       borderBottom: "1px solid var(--border)",
-                      textAlign: "right",
-                      maxWidth: 220,
-                      whiteSpace: "normal",
+                      textAlign: "left",
+                      maxWidth: 240,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                       color: "var(--text-muted)",
                     }}
                   >
