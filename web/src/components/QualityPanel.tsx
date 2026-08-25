@@ -93,6 +93,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
       </WidgetCard>
 
       <WidgetCard
+        wide
         title="Findings"
         subtitle="Automated checks, most severe first"
         staticCard
@@ -357,6 +358,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
       </WidgetCard>
 
       <WidgetCard
+        wide
         title="Cross-source agreement"
         subtitle="Company-months carried by two or more feeds"
         staticCard
@@ -402,6 +404,7 @@ export function QualityPanel({ quality }: { quality: Quality }) {
       </WidgetCard>
 
       <WidgetCard
+        full
         title="Fetch log"
         subtitle="Every upstream request, by source and month"
         wide

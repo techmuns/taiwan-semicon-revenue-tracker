@@ -148,7 +148,7 @@ export function DataTable({
 }: {
   rows: AnalyticsRow[];
   onSelect: (ticker: string) => void;
-  maxHeight?: number;
+  maxHeight?: number | string;
 }) {
   const [sortKey, setSortKey] = useState<keyof AnalyticsRow>("month");
   const [desc, setDesc] = useState(true);

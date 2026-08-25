@@ -47,6 +47,21 @@ const GRID: CSSProperties = {
   alignItems: "start",
 };
 
+/**
+ * How tall a matrix may get before it scrolls.
+ *
+ * These were fixed pixel guesses (420 and 560) chosen against one screen size,
+ * so on anything taller they left the card short and sliced the last row in
+ * half - the table looked truncated rather than scrollable, which is the
+ * complaint. Sizing against the viewport lets the matrix use whatever room the
+ * page actually has, while `max()` keeps a usable floor on a laptop. The
+ * subtrahend is the chrome above each one: header + filter bar + card header +
+ * legend, plus the KPI strip on Overview.
+ */
+const MATRIX_H_OVERVIEW = "max(300px, calc(100vh - 430px))";
+const MATRIX_H_ACCEL = "max(340px, calc(100vh - 300px))";
+const TABLE_H_DATA = "max(360px, calc(100vh - 250px))";
+
 const METRIC_OPTIONS = METRICS.map((m) => ({
   value: m.key,
   label: m.label,
@@ -259,7 +274,7 @@ export default function App() {
                       ) : null
                     }
                   >
-                    {(d) => <DataTable rows={d.rows} onSelect={openCompany} />}
+                    {(d) => <DataTable rows={d.rows} onSelect={openCompany} maxHeight={TABLE_H_DATA} />}
                   </AsyncBody>
                 </WidgetCard>
               </div>
@@ -373,7 +388,7 @@ function OverviewTab({
                   rows={bucketRows(d)}
                   metric={metric}
                   rowHeader="Stage"
-                  maxHeight={420}
+                  maxHeight={MATRIX_H_OVERVIEW}
                 />
               ) : (
                 <Heatmap
@@ -381,7 +396,7 @@ function OverviewTab({
                   rows={bucketRows(d)}
                   metric={metric}
                   rowHeader="Stage"
-                  maxHeight={420}
+                  maxHeight={MATRIX_H_OVERVIEW}
                 />
               )
             }
@@ -464,7 +479,14 @@ function AccelerationTab({
     <div style={GRID}>
       <WidgetCard
         title="Company by month"
-        subtitle={`${spec.label} in ${spec.unit} · strongest latest month first · click a row for the filings`}
+        // The count is here because the matrix scrolls. Without it, a row sliced
+        // by the container's edge reads as "the table is cut off" rather than
+        // "there are more below" - which was exactly the complaint.
+        subtitle={
+          `${spec.label} in ${spec.unit}` +
+          (heat.data ? ` · ${new Set(heat.data.cells.map((c) => c.ticker)).size} companies` : "") +
+          ` · strongest latest month first · click a row for the filings`
+        }
         full
         staticCard
         bodyStyle={{ overflow: "hidden" }}
@@ -501,7 +523,7 @@ function AccelerationTab({
                 metric={metric}
                 rowHeader="Company"
                 onRowClick={onSelect}
-                maxHeight={560}
+                maxHeight={MATRIX_H_ACCEL}
               />
             ) : (
               <Heatmap
@@ -510,7 +532,7 @@ function AccelerationTab({
                 metric={metric}
                 rowHeader="Company"
                 onRowClick={onSelect}
-                maxHeight={560}
+                maxHeight={MATRIX_H_ACCEL}
               />
             )
           }

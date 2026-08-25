@@ -96,7 +96,7 @@ export function MatrixTable({
   metric: HeatmapMetric;
   rowHeader?: string;
   onRowClick?: (key: string) => void;
-  maxHeight?: number;
+  maxHeight?: number | string;
   /** The trailing per-row mean across the months in view. */
   average?: boolean;
 }) {
@@ -327,7 +327,7 @@ export function SeriesTable({
 }: {
   months: string[];
   series: TableSeries[];
-  maxHeight?: number;
+  maxHeight?: number | string;
   /** Printed in the footer. Omit when each cell already carries its own unit. */
   unit?: "ppt" | "%" | undefined;
   note?: string | undefined;

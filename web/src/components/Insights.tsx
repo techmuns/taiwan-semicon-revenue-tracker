@@ -127,6 +127,7 @@ export function Insights({
   return (
     <>
       <WidgetCard
+        wide
         title="Accelerating"
         subtitle="Biggest increase in the YoY rate · sparkline is the YoY path"
         staticCard
@@ -134,6 +135,7 @@ export function Insights({
         <MoverList rows={rows} latestRows={latestRows} direction="top" onSelect={onSelect} />
       </WidgetCard>
       <WidgetCard
+        wide
         title="Decelerating"
         subtitle="Biggest decrease in the YoY rate"
         staticCard

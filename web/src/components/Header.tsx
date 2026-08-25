@@ -184,33 +184,13 @@ export function Header({
           whiteSpace: "nowrap",
         }}
       >
-        {meta?.access?.public && (
-          <span
-            title={meta.access.note}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              padding: "1px 7px",
-              borderRadius: 4,
-              border: "1px solid var(--warn-border)",
-              background: "var(--warn-bg)",
-              color: "var(--warn-text)",
-              fontWeight: 600,
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "var(--status-warning)",
-              }}
-            />
-            open access
-          </span>
-        )}
+        {/* The "open access" chip used to live here. Removed at the owner's
+            request: it is operator information, not reader information, and it
+            sat in the busiest 200px of the header competing with the freshness
+            stamp and the export button on every screen.
+            The posture is NOT hidden - it is still reported by /api/meta, and
+            still stated in the Method and units card on the Overview tab, which
+            is where someone asking "who can see this?" would look. */}
         {meta?.latest_month && (
           <span
             title={`data last written ${lastSeen ?? "unknown"}`}

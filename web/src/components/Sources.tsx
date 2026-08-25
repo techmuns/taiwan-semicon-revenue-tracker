@@ -104,6 +104,7 @@ export function Sources({ meta, now }: { meta: Meta; now: number }) {
       </WidgetCard>
 
       <WidgetCard
+        collapsible
         title="Method and units"
         subtitle="What the numbers mean before you quote them"
         staticCard

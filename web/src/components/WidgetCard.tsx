@@ -14,7 +14,8 @@
  * else.
  */
 
-import type { CSSProperties, ReactNode } from "react";
+import { useState } from "react";
+import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 
 export interface WidgetCardProps {
   title: string;
@@ -30,6 +31,14 @@ export interface WidgetCardProps {
   staticCard?: boolean;
   /** Applied to the body, e.g. to let a matrix scroll horizontally. */
   bodyStyle?: CSSProperties;
+  /**
+   * Lets the reader fold the body away. For reference copy - the kind of card
+   * you read once and then want out of the way - rather than for data, which
+   * should never need a click to be seen.
+   */
+  collapsible?: boolean;
+  /** Only meaningful with `collapsible`. Defaults to closed. */
+  defaultOpen?: boolean;
   children: ReactNode;
 }
 
@@ -41,8 +50,12 @@ export function WidgetCard({
   full,
   staticCard,
   bodyStyle,
+  collapsible,
+  defaultOpen = false,
   children,
 }: WidgetCardProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  const folded = collapsible && !open;
   return (
     <div
       className={`widget-card${staticCard ? " widget-card--static" : ""}`}
@@ -52,6 +65,20 @@ export function WidgetCard({
       }}
     >
       <div
+        {...(collapsible
+          ? {
+              role: "button" as const,
+              tabIndex: 0,
+              "aria-expanded": open,
+              onClick: () => setOpen((v) => !v),
+              onKeyDown: (e: KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpen((v) => !v);
+                }
+              },
+            }
+          : {})}
         style={{
           display: "flex",
           alignItems: "center",
@@ -59,9 +86,13 @@ export function WidgetCard({
           gap: 12,
           minHeight: 38,
           padding: "8px 12px",
-          borderBottom: "1px solid var(--border)",
+          // A folded card has no body, so its header border would be a rule
+          // under nothing.
+          borderBottom: folded ? "none" : "1px solid var(--border)",
           background: "var(--card-header-bg)",
           flexShrink: 0,
+          cursor: collapsible ? "pointer" : undefined,
+          userSelect: collapsible ? "none" : undefined,
         }}
       >
         <div style={{ minWidth: 0 }}>
@@ -89,23 +120,42 @@ export function WidgetCard({
             </p>
           )}
         </div>
-        {actions && (
+        {(actions || collapsible) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             {actions}
+            {collapsible && (
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-flex",
+                  color: "var(--text-hint)",
+                  transform: open ? "rotate(180deg)" : "none",
+                  transition: "transform 0.14s cubic-bezier(0.2, 0, 0.2, 1)",
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2.2"
+                     strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </span>
+            )}
           </div>
         )}
       </div>
-      <div
-        style={{
-          flex: 1,
-          position: "relative",
-          overflow: "hidden",
-          background: "var(--card-body-bg)",
-          ...bodyStyle,
-        }}
-      >
-        {children}
-      </div>
+      {!folded && (
+        <div
+          style={{
+            flex: 1,
+            position: "relative",
+            overflow: "hidden",
+            background: "var(--card-body-bg)",
+            ...bodyStyle,
+          }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }

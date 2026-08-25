@@ -63,7 +63,7 @@ export function Heatmap({
   metric: HeatmapMetric;
   rowHeader?: string;
   onRowClick?: (key: string) => void;
-  maxHeight?: number;
+  maxHeight?: number | string;
   /** The trailing per-row mean across the months in view. */
   average?: boolean;
 }) {
@@ -190,11 +190,20 @@ export function Heatmap({
                     cursor: onRowClick ? "pointer" : undefined,
                   }}
                 >
-                  {row.label}
+                  {/* Two lines, not one run-on. The identity is four facts -
+                      name, ticker, stage, tier - and setting them as
+                      "Alchip 3661 · AI Silicon · T1" made a 300px ribbon of
+                      middle-grey text that the eye has to parse before it can
+                      reach the numbers, which are the point. The name gets the
+                      first line and the weight; the rest drops to a quiet
+                      second line the reader can ignore until they need it. */}
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-primary)" }}>
+                    {row.label}
+                  </div>
                   {row.sublabel && (
-                    <span style={{ color: "var(--text-hint)", marginLeft: 6, fontWeight: 400 }}>
+                    <div style={{ fontSize: 10, fontWeight: 400, color: "var(--text-hint)", marginTop: 1 }}>
                       {row.sublabel}
-                    </span>
+                    </div>
                   )}
                 </th>
                 {months.map((m) => {
@@ -212,7 +221,7 @@ export function Heatmap({
                         // 2px surface gap between fills, so adjacent bands stay legible.
                         border: "1px solid var(--chart-surface)",
                         borderWidth: 1,
-                        height: 24,
+                        height: 30,
                         position: "relative",
                         fontVariantNumeric: "tabular-nums",
                         fontWeight: band !== null && Math.abs(band) === 3 ? 600 : 400,
@@ -286,7 +295,7 @@ export function Heatmap({
                       textAlign: "center",
                       border: "1px solid var(--chart-surface)",
                       borderLeft: SUMMARY_EDGE,
-                      height: 24,
+                      height: 30,
                       fontWeight: 600,
                       fontVariantNumeric: "tabular-nums",
                     }}
