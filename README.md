@@ -122,7 +122,7 @@ sent to someone else and arrive identical.
 | Company | One name: series, and the as-filed rows every number came from |
 | Buckets | Rebased revenue index per stage, ten facets on one shared scale |
 | Data | The twelve columns, sortable, identical to the CSV export |
-| Quality | Coverage, findings, cross-source agreement, fetch log |
+| Quality | Coverage, findings, interior gaps, cross-source agreement |
 
 Every chart can be **redrawn as a table of numbers** — one toggle per screen,
 graph by default, `viz=table` in the URL when it isn't. It exists because a

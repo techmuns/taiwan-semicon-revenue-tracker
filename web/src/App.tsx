@@ -37,7 +37,7 @@ import { DataTable } from "./components/DataTable";
 import { CompanyPanel } from "./components/CompanyPanel";
 import { QualityPanel } from "./components/QualityPanel";
 import { Buckets } from "./components/Buckets";
-import { Sources } from "./components/Sources";
+import { Provenance } from "./components/Provenance";
 import type { AnalyticsRow, BucketHeatmap, HeatmapMetric, Meta, TickerHeatmap } from "./types";
 
 const GRID: CSSProperties = {
@@ -421,7 +421,7 @@ function OverviewTab({
             handle an empty list, so the wrapper bought nothing. */}
         <Insights rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />
 
-        {meta && <Sources meta={meta} now={now} />}
+        {meta && <Provenance meta={meta} now={now} />}
       </div>
     </>
   );

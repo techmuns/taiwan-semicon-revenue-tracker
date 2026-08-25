@@ -16,7 +16,7 @@
 import { WidgetCard } from "./WidgetCard";
 import { EmptyState } from "./states";
 import { StatusDot } from "./controls";
-import { monthShort, utcStamp } from "../format";
+import { monthShort } from "../format";
 import { groupBy } from "../stats";
 import type { Quality } from "../types";
 
@@ -29,7 +29,7 @@ const SEVERITY_LEVEL: Record<string, "good" | "warning" | "serious" | "critical"
 };
 
 export function QualityPanel({ quality }: { quality: Quality }) {
-  const { coverage, matrix, interior_gaps, findings, fetch_log, multi_source_cells } = quality;
+  const { coverage, matrix, interior_gaps, findings, multi_source_cells } = quality;
   const months = [...new Set(matrix.map((c) => c.month))].sort();
   const byTicker = groupBy(matrix, (c) => c.ticker);
   const rows = [...byTicker.entries()].sort((a, b) => {
@@ -400,100 +400,6 @@ export function QualityPanel({ quality }: { quality: Quality }) {
               </div>
             ))}
           </div>
-        )}
-      </WidgetCard>
-
-      <WidgetCard
-        full
-        title="Fetch log"
-        subtitle="Every upstream request, by source and month"
-        wide
-        staticCard
-        bodyStyle={{ overflow: "auto" }}
-      >
-        {fetch_log.length === 0 ? (
-          <EmptyState
-            message="No fetches recorded"
-            hint="The data was loaded from a seed file rather than fetched by the Worker."
-          />
-        ) : (
-          <table
-            className="tnum"
-            style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}
-          >
-            <thead>
-              <tr>
-                {["Source", "Month", "Fetches", "OK", "Failed", "Last fetch (UTC)"].map((h, i) => (
-                  <th
-                    key={h}
-                    scope="col"
-                    style={{
-                      textAlign: i < 2 ? "left" : "right",
-                      padding: "6px 10px",
-                      fontSize: 10,
-                      fontWeight: 600,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                      color: "var(--ink-muted)",
-                      borderBottom: "1px solid var(--border-solid)",
-                    }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {fetch_log.map((f, i) => (
-                <tr key={i}>
-                  <td style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)" }}>
-                    {f.source_id}
-                  </td>
-                  <td style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)" }}>
-                    {f.month}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 10px",
-                      borderBottom: "1px solid var(--border)",
-                      textAlign: "right",
-                    }}
-                  >
-                    {f.fetches}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 10px",
-                      borderBottom: "1px solid var(--border)",
-                      textAlign: "right",
-                    }}
-                  >
-                    {f.ok_n}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 10px",
-                      borderBottom: "1px solid var(--border)",
-                      textAlign: "right",
-                      color: f.fail_n > 0 ? "var(--error-red)" : "var(--text-hint)",
-                    }}
-                  >
-                    {f.fail_n}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 10px",
-                      borderBottom: "1px solid var(--border)",
-                      textAlign: "right",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    {utcStamp(f.last_fetch_utc)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         )}
       </WidgetCard>
     </>

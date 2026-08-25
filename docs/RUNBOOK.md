@@ -497,7 +497,7 @@ All read-only. `GET` only; anything else returns 405.
 | `/api/analytics?from&to&tickers&buckets&tiers&only_with_data` | The twelve columns, in spec order. |
 | `/api/heatmap?metric&group=bucket\|ticker&agg=weighted\|equal` | Aggregated cells. |
 | `/api/company/:ticker` | Full series, raw rows, restatements. |
-| `/api/quality` | Coverage matrix, findings, fetch log. |
+| `/api/quality` | Coverage matrix, findings, fetch log. The UI reads everything but `fetch_log`, which is kept for operators reading the JSON directly. |
 | `/api/export.csv?…` | The twelve columns with a UTF-8 BOM so Excel opens it correctly. |
 
 Responses carry `Cache-Control: public, max-age=300`. The data changes monthly,
