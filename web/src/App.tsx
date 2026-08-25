@@ -37,7 +37,7 @@ import { DataTable } from "./components/DataTable";
 import { CompanyPanel } from "./components/CompanyPanel";
 import { QualityPanel } from "./components/QualityPanel";
 import { Buckets } from "./components/Buckets";
-import { Provenance } from "./components/Provenance";
+import { MethodAndUnits } from "./components/Method";
 import type { AnalyticsRow, BucketHeatmap, HeatmapMetric, Meta, TickerHeatmap } from "./types";
 
 const GRID: CSSProperties = {
@@ -207,7 +207,6 @@ export default function App() {
                 onAgg={(agg) => setView((v) => ({ ...v, agg }))}
                 onViz={setViz}
                 onSelect={openCompany}
-                now={now}
               />
             )}
 
@@ -314,7 +313,6 @@ function OverviewTab({
   onAgg,
   onViz,
   onSelect,
-  now,
 }: {
   meta: Meta | null;
   filters: FilterState;
@@ -328,7 +326,6 @@ function OverviewTab({
   onAgg: (a: "weighted" | "equal") => void;
   onViz: (v: ViewMode) => void;
   onSelect: (ticker: string) => void;
-  now: number;
 }) {
   const heat = useApi(
     () => api.bucketHeatmap(filters, metric, agg),
@@ -421,7 +418,7 @@ function OverviewTab({
             handle an empty list, so the wrapper bought nothing. */}
         <Insights rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />
 
-        {meta && <Provenance meta={meta} now={now} />}
+        {meta && <MethodAndUnits meta={meta} />}
       </div>
     </>
   );
