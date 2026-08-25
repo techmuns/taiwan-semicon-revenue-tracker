@@ -26,6 +26,18 @@ other Workers. `crons = ["0 1 11,14,18 * *"]` is one trigger, so freeing a
 single unused schedule elsewhere in the account is enough. Otherwise Workers
 Paid raises the limit to 1,000.
 
+**Re-verified 2026-08-24** on a fresh deploy — this is a live constraint, not a
+stale note. The API returns `code: 10072` against
+`/accounts/a441977d2344922f96303859b74754d8/workers/scripts/taiwan-semicon-revenue/schedules`.
+Re-check it by reading the tail of any `wrangler deploy`: the absence of that
+block is what "the cron finally registered" looks like. Note the deploy itself
+still succeeds and prints the URL — wrangler says "Successful trigger changes
+were not rolled back", so the asset and Worker upload are unaffected.
+
+Finding which five hold the budget: the dashboard has no global cron list, so it
+is Workers & Pages → each Worker → Settings → Triggers. Deleting one unused
+schedule and redeploying this Worker is enough; nothing here needs changing.
+
 This is the only reason the deploy prints an error. The Worker itself,
 its bindings, and the assets all deploy fine — wrangler says so explicitly:
 "Trigger configuration … was only partially updated". Nothing else is affected.
