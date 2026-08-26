@@ -10,13 +10,18 @@
  * - is already in the header, beside the latest month, where it is read without
  * scrolling to the bottom of the page.
  *
+ * The access posture went the same way. "access: open - NO ACCESS CONTROL. Set
+ * DASHBOARD_KEY, or CF_ACCESS_TEAM_DOMAIN + CF_ACCESS_AUD" is a deployment
+ * instruction addressed to whoever runs the Worker, printed at the bottom of a
+ * revenue dashboard. It is still reported by /api/meta and documented in the
+ * runbook, which is where the person who can act on it looks.
+ *
  * What survives is the part a reader genuinely needs before quoting a number:
  * the units, and what a blank cell means. It spans the full grid and folds, so
  * the tab ends on a footer bar rather than an orphan column.
  */
 
 import { WidgetCard } from "./WidgetCard";
-import { StatusDot } from "./controls";
 import type { Meta } from "../types";
 
 export function MethodAndUnits({ meta }: { meta: Meta }) {
@@ -61,22 +66,6 @@ export function MethodAndUnits({ meta }: { meta: Meta }) {
           denominator yields <strong>no value</strong>, never zero. An em dash means the figure
           does not exist; it never means zero.
         </div>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          flexWrap: "wrap",
-          alignItems: "center",
-          padding: "8px 14px 12px",
-          fontSize: 11,
-          color: "var(--text-muted)",
-        }}
-      >
-        <StatusDot level={meta.access.public ? "warning" : "good"}>
-          access: {meta.access.mode}
-        </StatusDot>
-        <span style={{ color: "var(--text-hint)" }}>{meta.access.note}</span>
       </div>
     </WidgetCard>
   );

@@ -9,11 +9,12 @@
  * which there are two inside the widgets below it. An underline says "you are
  * here", and it is the only thing in the header that carries the accent hue.
  *
- * The access posture is shown here when the API reports the dashboard is open,
- * because "we left it public and forgot" is a state that has to be visible
- * somewhere the reader cannot miss. In shared-key mode the posture is safe, so it
- * gets no chip - just the Lock action, which is the only way to end a session on a
- * shared machine once the cookie is set for thirty days.
+ * The access posture is no longer shown anywhere in the UI. "we left it public
+ * and forgot" is a real state, but it is one only the deploying operator can
+ * change, and they read /api/meta and the runbook rather than the header of a
+ * revenue dashboard. What remains here is the Lock action, shown only in
+ * shared-key mode, because that IS a reader action: it is the only way to end a
+ * session on a shared machine once the cookie is set for thirty days.
  */
 
 import { Segmented, TickerPill } from "./controls";
@@ -187,9 +188,10 @@ export function Header({
             request: it is operator information, not reader information, and it
             sat in the busiest 200px of the header competing with the freshness
             stamp and the export button on every screen.
-            The posture is NOT hidden - it is still reported by /api/meta, and
-            still stated in the Method and units card on the Overview tab, which
-            is where someone asking "who can see this?" would look. */}
+            The Method and units card carried it for a while afterwards and has
+            since dropped it too, for the same reason. The posture is not lost:
+            /api/meta still reports it and the runbook documents it, which is
+            where the person who can actually change it is looking. */}
         {meta?.latest_month && (
           <span
             title={`data last written ${lastSeen ?? "unknown"}`}
