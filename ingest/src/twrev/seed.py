@@ -239,6 +239,13 @@ def build(
     return "\n".join(out) + "\n"
 
 
+# The reference cell every gate is anchored on. Exported so a caller can ask
+# whether the store even contains it before treating its absence as a failure -
+# on a fresh store holding one month, "the golden row is missing" means the
+# store is new, not that the data is wrong.
+GOLDEN_KEY = ("2330", "2026-03")
+
+
 def golden_checks(rows: list[dict[str, Any]]) -> list[str]:
     """Assertions on the seeded rows that must hold before the file is trusted.
 
@@ -249,9 +256,9 @@ def golden_checks(rows: list[dict[str, Any]]) -> list[str]:
     problems: list[str] = []
     by_key = {(r["ticker"], r["month"]): r for r in rows}
 
-    golden = by_key.get(("2330", "2026-03"))
+    golden = by_key.get(GOLDEN_KEY)
     if golden is None:
-        problems.append("golden row 2330/2026-03 absent from the seed")
+        problems.append(f"golden row {GOLDEN_KEY[0]}/{GOLDEN_KEY[1]} absent from the seed")
     else:
         expect = {
             "revenue_month": 415191699,

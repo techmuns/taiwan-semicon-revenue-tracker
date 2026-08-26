@@ -172,7 +172,12 @@ npx wrangler secret put DASHBOARD_KEY --cwd worker
 
 Effective on the next request, no deploy. See [Access](docs/RUNBOOK.md#access).
 
-One item is open and it needs an account change rather than code: the monthly cron
-cannot register because the Cloudflare account has already spent its 5 free cron
-triggers, so the refresh is run by hand once a month. Written up in
-[docs/RUNBOOK.md](docs/RUNBOOK.md#open-items).
+The monthly refresh runs on **GitHub Actions**, not on a Cloudflare cron — the
+account is at the Workers Free ceiling of 5 cron triggers per account, so the
+Worker's schedule never registered and not one refresh ever fired. Actions has
+no such cap, and no subrequest budget either, so it scrapes all 36 trackable
+names from MOPS *and* reads the OpenAPI feeds, which is what finally gives the
+cross-source check two independent readings of the same filing to compare. The
+store is a SQLite file on the orphan branch `pipeline-state`, running the same
+migrations D1 runs. Written up in
+[docs/RUNBOOK.md](docs/RUNBOOK.md#the-monthly-refresh-runs-on-github-actions).

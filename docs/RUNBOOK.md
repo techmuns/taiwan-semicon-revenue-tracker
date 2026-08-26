@@ -8,52 +8,115 @@ Live: <https://taiwan-semicon-revenue.tech-441.workers.dev>
 
 ---
 
-## Open items
+## The monthly refresh runs on GitHub Actions
 
-One thing is not closed, and it cannot be closed from a terminal.
+`.github/workflows/refresh.yml`, on the 11th, 14th and 18th at 01:00 UTC, plus
+`workflow_dispatch` for a manual run. It scrapes MOPS for every company, reads
+the three OpenAPI feeds as a second opinion, and writes a SQLite store.
 
-### There is no monthly auto-refresh
+```bash
+# manual run, from the Actions tab or:
+gh workflow run refresh -f month=2026-08
 
-`worker/wrangler.toml` declares the schedule and the code is written and
-deployed, but **the cron trigger will not register**:
+# locally, against a scratch store:
+PYTHONPATH=ingest/src python -m twrev.cli refresh --db /tmp/test.sqlite --month 2026-07
+```
+
+### Why it is not a Cloudflare cron
+
+Because that never ran. The account is at the Workers Free ceiling of **5 cron
+triggers per account** — the limit is per account, not per Worker, and the five
+were already spent elsewhere — so every `wrangler deploy` ended with:
 
 ```
 This account has reached the Workers Free limit of 5 cron triggers per account.
+[code: 10072]
 ```
 
-The limit is per **account**, not per Worker, and the five are already spent on
-other Workers. `crons = ["0 1 11,14,18 * *"]` is one trigger, so freeing a
-single unused schedule elsewhere in the account is enough. Otherwise Workers
-Paid raises the limit to 1,000.
+The scheduled handler was therefore never registered and not one refresh ever
+fired. A GitHub Actions schedule has no such cap.
 
-**Re-verified 2026-08-24** on a fresh deploy — this is a live constraint, not a
-stale note. The API returns `code: 10072` against
-`/accounts/a441977d2344922f96303859b74754d8/workers/scripts/taiwan-semicon-revenue/schedules`.
-Re-check it by reading the tail of any `wrangler deploy`: the absence of that
-block is what "the cron finally registered" looks like. Note the deploy itself
-still succeeds and prints the URL — wrangler says "Successful trigger changes
-were not rolled back", so the asset and Worker upload are unaffected.
+It is also the better home on the merits. The Worker had a subrequest budget,
+which is why its repair path fetched MOPS for **tier-1 names only**; a runner has
+none, so the Actions run scrapes all 36 trackable names from MOPS *and* reads the
+feeds. That is what finally gives the cross-source check something to compare —
+see below.
 
-Finding which five hold the budget: the dashboard has no global cron list, so it
-is Workers & Pages → each Worker → Settings → Triggers. Deleting one unused
-schedule and redeploying this Worker is enough; nothing here needs changing.
+To be clear about what this did **not** fix: this project was never near a rate
+limit. The store is 296 rows and ~192 KB against D1's 5M-row-reads/day free
+tier. What was exhausted was a quota on *scheduled jobs*, nothing else.
 
-This is the only reason the deploy prints an error. The Worker itself,
-its bindings, and the assets all deploy fine — wrangler says so explicitly:
-"Trigger configuration … was only partially updated". Nothing else is affected.
+### The store
 
-Until it registers, refresh by hand once a month, any time after the 10th:
+A SQLite file, `data/pipeline.sqlite`, carried on the orphan branch
+`pipeline-state` and force-pushed on every run. Force-push is deliberate: the
+branch holds state, not history, so a fresh single commit each month keeps the
+repository from growing a binary revision forever.
 
-```bash
-npx wrangler dev --test-scheduled --cwd worker
-# then, in another shell:
-curl "http://localhost:8787/__scheduled?cron=0+1+11+*+*"
-```
+It is the **same schema D1 runs** — `store.connect()` applies
+`worker/migrations/*.sql` verbatim. The two engines were diffed before the
+switch: 296 company-months × 12 columns of `analytics_monthly`, **zero
+divergences**. `store.py` still describes itself as a verification harness in
+its docstring; that is how it began, and it is now the store of record.
 
-Every write is gated on `row_hash`, so running it repeatedly is harmless and
-running it early is a clean no-op — the cron derives the month from the payload's
-`資料年月`, never from the clock, so a feed still showing the prior month logs
-and exits.
+A first run with no `pipeline-state` branch is the bootstrap case, not an error:
+`refresh` creates the file from the migrations.
+
+### Cross-source checking is real now
+
+Under the Worker it was structurally impossible. The feeds partition the
+universe — `t187ap05_L` carries 31 of the 37, `mopsfin_t187ap05_O` the other 5,
+and a company is 上市 or 上櫃 but never both — while `t187ap05_P`, the feed the
+brief names, carries **none** of them (it is the 公開發行公司 dataset). MOPS only
+ran for names the feeds had already missed, so no company-month was ever held by
+two sources and `openapi.compare` had nothing to compare.
+
+Scraping every name via MOPS *and* reading the feeds gives the same cell from two
+independent renderings of one filing. A verified run: **36 company-months carried
+by two sources, 0 disagreements**. A disagreement raises
+`SOURCE_DISAGREEMENT`, which reaches the reader through `AlertStrip` on every
+tab.
+
+### What fails the run, and what does not
+
+Three passes a month exist because filers trickle in and MOPS is intermittent.
+So a straggler is not a failure:
+
+- Up to `MAX_SOFT_FAILURES` (3) missing cells → warn, exit 0, next pass collects them.
+- More than that, or any non-`FETCH_FAILED` error finding → exit 1.
+- Golden checks (`2330/2026-03`) failing → exit 1, nothing persisted.
+
+The golden gate is **skipped** when the store does not yet contain the reference
+cell, since on a fresh store its absence means "new store", not "bad data".
+
+MOPS serves a block page on first contact and the real page on retry — expect
+`rejected` in the fetcher stats to run at roughly one per cell. `refresh` also
+does one explicit retry pass over cells that exhausted their attempts.
+
+### MOPS is User-Agent sniffed — do not "tidy" the headers
+
+MOPS returns *"FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED"* to a default
+`curl` agent **and to a Linux Chrome agent**. It serves data only to the Windows
+Chrome UA in `http.py:DEFAULT_HEADERS`. This is UA sniffing, not an IP block —
+cloud runners are fine. Those headers are load-bearing.
+
+### GitHub disables schedules after 60 days of repo inactivity
+
+A real hazard for a monthly job on a quiet repo: the workflow silently stops
+firing. `workflow_dispatch` is the manual escape hatch, and any push resets the
+clock.
+
+### Expect two restatements on the first production refresh
+
+`3661` and `6415` file their 備註 note in the layout `RE_NOTE_KY` handles, which
+was added in `a976750` — *after* the current D1 rows were seeded. So the live
+rows carry `note = NULL` for those two and the refreshed rows carry the real
+text, which changes `row_hash` and trips the restatement trigger.
+
+Verified: 34 of 36 company-months are byte-identical to D1 including `row_hash`;
+the two that differ, differ only in `note` and its hash, and the note is
+genuinely present in the MOPS bytes. This is the parser fix landing, **not** a
+filer revision. It will happen once.
 
 ---
 
@@ -278,13 +341,18 @@ curl -s -o /dev/null -w 'unknown ticker -> %{http_code} (want 404)\n' "$B/api/co
 
 `npx wrangler rollback` reverts to the previous version if anything looks wrong.
 
-### The cron error on every deploy is expected
+### The cron error on every deploy is expected — for now
 
-The deploy prints `This account has reached the Workers Free limit of 5 cron
-triggers per account`. That is the [open item](#there-is-no-monthly-auto-refresh),
-not a failed deploy — wrangler says so itself: "Trigger configuration … was only
-partially updated". The Worker, its bindings and the assets all land. Do not
-retry on account of it.
+The deploy still prints `This account has reached the Workers Free limit of 5
+cron triggers per account`, because `worker/wrangler.toml` still declares
+`crons`. It is not a failed deploy — wrangler says so itself: "Trigger
+configuration … was only partially updated" — and the Worker, its bindings and
+the assets all land. Do not retry on account of it.
+
+The refresh no longer depends on that trigger ever registering; it runs on
+GitHub Actions. The `crons` line and `worker/src/cron.ts` come out when the
+Worker is stripped back to `/health` plus assets, at which point this error
+stops appearing.
 
 `web/` builds directly into `worker/public`, which the `[assets]` binding
 serves, so the SPA and the API share one origin — no CORS, no second host to

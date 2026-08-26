@@ -33,3 +33,7 @@ ingest/out/
 Thumbs.db
 .vscode/
 .idea/
+
+# The SQLite store lives on the orphan branch `pipeline-state`, not in main's
+# history - see docs/RUNBOOK.md. A local refresh writes here; keep it out.
+data/

@@ -5,6 +5,7 @@
     python -m twrev.cli report   --from 2025-12 --to 2026-07      (offline, cache only)
     python -m twrev.cli seed     --from 2025-12 --to 2026-07 --out ../out/seed.sql
     python -m twrev.cli show     --ticker 2330
+    python -m twrev.cli refresh  --db data/pipeline.sqlite
 
 `--tickers` is a real filter here: per-company fetches are independent, so
 repairing one ticker-month costs exactly one request.
@@ -16,11 +17,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import backfill as bf
 from . import roc
 from .config import ConfigError, load_sources, load_universe, repo_root
-from .http import CachedFetcher
+from .http import CachedFetcher, utc_now_iso
 
 
 def _window(args: argparse.Namespace) -> list[str]:
@@ -41,6 +43,12 @@ def _fetcher(args: argparse.Namespace, sources) -> CachedFetcher:
         backoff_s=cfg.backoff_s,
         offline=args.offline or None,
     )
+
+
+# Missing cells tolerated before a refresh is called a failure. Three passes a
+# month means a straggler normally lands on the next one; more than this many at
+# once is a source problem, not a straggler.
+MAX_SOFT_FAILURES = 3
 
 
 def _print_report(report: bf.Report, universe, months: list[str],
@@ -251,6 +259,184 @@ def cmd_seed(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refresh(args: argparse.Namespace) -> int:
+    """Scrape the latest published month straight into the SQLite store.
+
+    This is what GitHub Actions runs, and it is the whole pipeline: MOPS for
+    every company, the OpenAPI feeds for a second opinion, both written to a
+    SQLite file that IS the store of record.
+
+    Why the store is a plain file rather than D1: the Worker's scheduled handler
+    was never registered, because the Cloudflare account sits at the Workers Free
+    ceiling of five cron triggers per account. A GitHub Actions schedule has no
+    such cap - and no subrequest budget either, which is why this fetches MOPS
+    for all 36 trackable names instead of repairing tier-1 only.
+
+    Nothing here is new machinery. `store` already applies the real D1 migrations
+    to SQLite and was used to prove the two engines agree: 296 company-months x
+    12 columns, zero divergences. It was written as a test harness; this promotes
+    it to production without changing a line of it.
+    """
+    from . import openapi, seed, store
+
+    universe, sources = load_universe(), load_sources()
+    month = args.month or roc.latest_expected_month()
+    db_path = Path(args.db or (repo_root() / "data" / "pipeline.sqlite")).resolve()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    fresh = not db_path.exists()
+
+    print(f"refresh {month}  ->  {db_path}")
+    print(f"  store  : {'creating' if fresh else 'existing'} "
+          f"({'-' if fresh else f'{db_path.stat().st_size:,} bytes'})")
+
+    fetcher = _fetcher(args, sources)
+    print(f"  cache  : {fetcher.cache_dir}   interval: {fetcher.min_interval_s}s")
+
+    # ---------------------------------------------------------- MOPS scrape --
+    report = bf.run(
+        universe=universe, sources=sources, fetcher=fetcher,
+        months=[month], tickers=None,
+        run_id=f"refresh-{month}-{utc_now_iso()}",
+        force_refetch=args.force_refetch, progress=not args.quiet,
+    )
+    # One retry pass for the cells that failed transiently.
+    #
+    # MOPS serves a block page on first contact and the real page on the retry -
+    # `rejected` in the fetcher stats runs at roughly one per cell - so a company
+    # that exhausts its five attempts is usually unlucky rather than broken, and
+    # asking again a moment later costs one request and normally works.
+    if report.failures:
+        retry = sorted({t for t, _, _ in report.failures})
+        print(f"  retry  : {len(retry)} cell(s) that failed transiently: {', '.join(retry)}")
+        second = bf.run(
+            universe=universe, sources=sources, fetcher=fetcher,
+            months=[month], tickers=retry, run_id=report.run_id,
+            force_refetch=True, progress=not args.quiet,
+        )
+        recovered = {r["ticker"] for r in second.rows}
+        if recovered:
+            print(f"  retry  : recovered {', '.join(sorted(recovered))}")
+        report.rows.extend(second.rows)
+        report.findings.extend(second.findings)
+        report.fetch_log.extend(second.fetch_log)
+        report.failures = [f for f in second.failures]
+
+    print(f"  http   : {fetcher.stats}")
+    _print_report(report, universe, [month])
+
+    # ------------------------------------------------- feeds, as a 2nd source --
+    #
+    # Worth doing HERE and not in the Worker. The feeds partition the universe -
+    # t187ap05_L carries 31 of our names, mopsfin_t187ap05_O the other 5, and a
+    # company is listed or OTC but never both - and the Worker only ever reached
+    # for MOPS on names the feeds had already missed. So no company-month was
+    # ever carried by two sources and the cross-source check had nothing to
+    # compare. Scraping every name via MOPS *and* reading the feeds gives the
+    # same cell from two independent renderings of one filing, which is the only
+    # way `openapi.compare` can actually catch a bad number.
+    feed_rows: list[dict[str, Any]] = []
+    if not args.skip_feeds:
+        for feed in sources.feeds:
+            try:
+                fetched = fetcher.get(feed.url, openapi.cache_key(feed),
+                                      validate=openapi.validate_body,
+                                      force_refetch=args.force_refetch)
+                res = openapi.parse(fetched.body, feed=feed, universe=universe,
+                                    expect_month=month)
+            except Exception as err:  # one dead feed must not fail the run
+                print(f"  feed {feed.source_id:18} SKIPPED  {type(err).__name__}: {err}")
+                report.findings.append({
+                    "run_id": report.run_id, "created_at_utc": utc_now_iso(),
+                    "severity": "warn", "code": "FEED_UNAVAILABLE", "month": month,
+                    "ticker": None, "source_id": feed.source_id,
+                    "message": f"{feed.source_id}: {type(err).__name__}: {err}"[:400],
+                })
+                continue
+            print(f"  feed {feed.source_id:18} month={res.month} "
+                  f"records={res.records:>5} universe_hits={len(res.covered):>3}")
+            if res.month == month:
+                feed_rows.extend(res.rows)
+            for severity, code, message in res.findings:
+                report.findings.append({
+                    "run_id": report.run_id, "created_at_utc": utc_now_iso(),
+                    "severity": severity, "code": code, "month": month,
+                    "ticker": None, "source_id": feed.source_id, "message": message,
+                })
+
+    disagreements = []
+    if feed_rows:
+        disagreements = openapi.compare(report.rows, feed_rows)
+        shared = {(r["ticker"], r["month"]) for r in report.rows} & \
+                 {(r["ticker"], r["month"]) for r in feed_rows}
+        print(f"  cross  : {len(shared)} company-months carried by two sources, "
+              f"{len(disagreements)} disagreement(s)")
+        for severity, code, message in disagreements:
+            report.findings.append({
+                "run_id": report.run_id, "created_at_utc": utc_now_iso(),
+                "severity": severity, "code": code, "month": month,
+                "ticker": None, "source_id": None, "message": message,
+            })
+
+    # ------------------------------------------------------------- persist --
+    conn = store.connect(db_path)
+    try:
+        store.load_universe(conn, universe)          # YAML stays authoritative
+        written = store.upsert_rows(conn, report.rows)
+        store.insert_findings(conn, report.findings)
+        store.insert_fetch_log(conn, report.fetch_log)
+        store.assert_view_contract(conn)
+        total = conn.execute("SELECT count(*) FROM raw_revenue").fetchone()[0]
+        print(f"  wrote  : {written} rows for {month}; store now holds {total}")
+
+        # Gate on the WHOLE store, not just this month - a refresh that corrupts
+        # an older row is exactly as bad as one that writes a wrong new row, and
+        # the golden numbers are the cheapest way to notice.
+        all_rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM raw_revenue WHERE source_id = ?", (bf.mc.SOURCE_ID,))]
+        # The gate anchors on one reference cell, so it can only speak once that
+        # cell is in the store. On a first run - an empty store refreshing a
+        # single month - its absence means "new store", not "bad data", and
+        # failing there would make the pipeline impossible to bootstrap.
+        gt, gm = seed.GOLDEN_KEY
+        have_golden = any(r["ticker"] == gt and r["month"] == gm for r in all_rows)
+        problems = seed.golden_checks(all_rows) if have_golden else []
+        if not have_golden:
+            print(f"  golden : skipped - store has no {gt}/{gm} yet "
+                  f"({len(all_rows)} rows). Restore pipeline-state to enable it.")
+    finally:
+        conn.close()
+
+    if problems:
+        print("\n  GOLDEN CHECKS FAILED:", file=sys.stderr)
+        for p in problems:
+            print(f"    - {p}", file=sys.stderr)
+        if not args.force:
+            print("  refusing the run (--force overrides)", file=sys.stderr)
+            return 1
+    elif have_golden:
+        print("  golden : pass")
+
+    # A cell that is still missing after the retry is not automatically a failed
+    # run. The schedule fires on the 11th, 14th and 18th precisely because
+    # Taiwanese filers trickle in and MOPS is intermittent; the later passes
+    # exist to collect the stragglers. Failing the job on one flaky company
+    # would cry wolf twice a month. Past MAX_SOFT_FAILURES it is no longer
+    # flakiness, and a human should look.
+    hard = [f for f in report.findings if f["severity"] == "error"
+            and f["code"] != "FETCH_FAILED"]
+    stragglers = sorted({t for t, _, _ in report.failures})
+    if stragglers:
+        print(f"\n  {len(stragglers)} cell(s) still missing after retry: "
+              f"{', '.join(stragglers)}")
+    if hard or len(stragglers) > MAX_SOFT_FAILURES:
+        print(f"  FAILED: {len(stragglers)} missing cell(s), {len(hard)} error "
+              f"finding(s)", file=sys.stderr)
+        return 1
+    if stragglers:
+        print("  the next scheduled pass will pick them up")
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     universe, sources = load_universe(), load_sources()
     company = universe[args.ticker]
@@ -337,6 +523,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--force", action="store_true",
                     help="write the seed even if the golden checks fail")
     sp.set_defaults(func=cmd_seed)
+
+    sp = sub.add_parser(
+        "refresh",
+        help="scrape the latest published month into the SQLite store (what CI runs)",
+    )
+    common(sp, window=False)
+    sp.add_argument("--month", default=None, metavar="YYYY-MM",
+                    help="override the month; default is the latest one due by the 10th")
+    sp.add_argument("--db", default=None,
+                    help="SQLite store path (default data/pipeline.sqlite)")
+    sp.add_argument("--skip-feeds", action="store_true",
+                    help="MOPS only; skips the OpenAPI cross-check")
+    sp.add_argument("--force-refetch", action="store_true")
+    sp.add_argument("--force", action="store_true",
+                    help="persist even if the golden checks fail")
+    sp.set_defaults(func=cmd_refresh)
 
     sp = sub.add_parser("show", help="print one ticker's series from the cache")
     sp.add_argument("--ticker", required=True)

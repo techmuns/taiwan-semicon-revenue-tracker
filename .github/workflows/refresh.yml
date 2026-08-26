@@ -1,0 +1,133 @@
+# Monthly revenue refresh.
+#
+# This replaced a Cloudflare Worker cron that never ran a single time. The
+# account sits at the Workers Free ceiling of five cron triggers per account, so
+# `wrangler deploy` reported `code: 10072` and the scheduled handler was never
+# registered. A GitHub Actions schedule has no such cap.
+#
+# It is also the better home for the scrape on its merits. The Worker had a
+# subrequest budget, which is why its repair path fetched MOPS for tier-1 names
+# only; a runner has no such budget, so this fetches all 36 trackable names from
+# MOPS *and* reads the OpenAPI feeds, which is what finally gives the
+# cross-source check two independent renderings of the same filing to compare.
+#
+# The store is a SQLite file carried on the orphan branch `pipeline-state`. It
+# is the same schema D1 runs - `store.connect()` applies worker/migrations/*.sql
+# verbatim - and the two engines were diffed at 296 company-months x 12 columns
+# with zero divergences before this was written.
+
+name: refresh
+
+on:
+  # Taiwan requires monthly revenue disclosure by the 10th. Three passes catch
+  # the late filers without hammering MOPS: the same 11/14/18 cadence the
+  # Worker's trigger declared but never got to run.
+  schedule:
+    - cron: "0 1 11,14,18 * *"
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "Month to refresh (YYYY-MM). Blank = latest due by the 10th."
+        required: false
+        type: string
+      force:
+        description: "Persist even if the golden checks fail"
+        required: false
+        type: boolean
+        default: false
+
+# A second run starting while the first is mid-scrape would race on the state
+# branch and could force-push a store built from a partial read.
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # 36 companies at a 3s throttle is ~2 minutes; 30 leaves room for retries
+    # and a slow MOPS without letting a hung run burn the month's minutes.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ingest/requirements.txt
+
+      - name: Install
+        run: pip install -r ingest/requirements.txt
+
+      # The scrape cache is the audit artifact - the bytes MOPS actually served.
+      # Restoring it makes a same-month re-run free and instant, which matters
+      # because the most common reason to re-run is a transient failure on two
+      # or three companies out of thirty-six.
+      - name: Restore scrape cache
+        uses: actions/cache@v4
+        with:
+          path: ingest/cache
+          key: mops-cache-${{ github.run_id }}
+          restore-keys: mops-cache-
+
+      # `data/pipeline.sqlite` lives on an orphan branch, force-pushed each run,
+      # so the store is durable without the repo's main history carrying a
+      # binary that changes every month. A missing branch is the first-run case,
+      # not an error: `refresh` creates the file from the migrations.
+      - name: Restore SQLite store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p data
+          if git fetch --depth=1 origin pipeline-state 2>/dev/null; then
+            git show FETCH_HEAD:pipeline.sqlite > data/pipeline.sqlite
+            echo "restored $(stat -c%s data/pipeline.sqlite) bytes"
+          else
+            echo "no pipeline-state branch yet - starting a fresh store"
+          fi
+
+      - name: Refresh
+        env:
+          PYTHONPATH: ingest/src
+        run: |
+          python -m twrev.cli refresh \
+            --db data/pipeline.sqlite \
+            ${{ inputs.month && format('--month {0}', inputs.month) || '' }} \
+            ${{ inputs.force && '--force' || '' }}
+
+      # Single-commit orphan branch, built in a scratch repo. Force-pushing a
+      # fresh history each time is deliberate: the branch holds state, not a
+      # record, so accumulating monthly binary revisions would grow the
+      # repository forever for no one's benefit.
+      - name: Push SQLite store
+        run: |
+          tmp="$(mktemp -d)"
+          cp data/pipeline.sqlite "$tmp/pipeline.sqlite"
+          cd "$tmp"
+          git init -q
+          git checkout -q -b pipeline-state
+          git add pipeline.sqlite
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -qm "pipeline state @ $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push -q --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            pipeline-state
+          echo "pushed $(stat -c%s pipeline.sqlite) bytes to pipeline-state"
+
+      # Kept regardless of outcome: when a run fails, the store as it stood and
+      # the bytes MOPS served are the only evidence of why.
+      - name: Upload store and findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-state-${{ github.run_id }}
+          path: |
+            data/pipeline.sqlite
+          retention-days: 30
+          if-no-files-found: warn
