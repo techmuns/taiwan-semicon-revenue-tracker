@@ -36,4 +36,8 @@ Thumbs.db
 
 # The SQLite store lives on the orphan branch `pipeline-state`, not in main's
 # history - see docs/RUNBOOK.md. A local refresh writes here; keep it out.
-data/
+#
+# ANCHORED. Unanchored `data/` matches a directory of that name at ANY depth,
+# which silently swallowed web/public/data - the exported JSON the dashboard
+# reads and the refresh commits. The leading slash is load-bearing.
+/data/

@@ -6,6 +6,7 @@
     python -m twrev.cli seed     --from 2025-12 --to 2026-07 --out ../out/seed.sql
     python -m twrev.cli show     --ticker 2330
     python -m twrev.cli refresh  --db data/pipeline.sqlite
+    python -m twrev.cli export   --db data/pipeline.sqlite --out web/public/data
 
 `--tickers` is a real filter here: per-company fetches are independent, so
 repairing one ticker-month costs exactly one request.
@@ -437,6 +438,47 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Write the dashboard's data as static files.
+
+    The Worker answered six endpoints out of D1 on every page load; it does not
+    need to. The whole dataset is 296 rows - /api/analytics was 105 KB raw and
+    10 KB gzipped - so the browser can hold all of it and filter locally, which
+    takes the database out of the request path entirely.
+
+    One endpoint is deliberately not exported. /api/heatmap aggregates over
+    whatever filters are live, and ticker selection is an arbitrary subset of 37
+    names, so its answers cannot be enumerated into files. That aggregation
+    moves to the browser.
+    """
+    from . import export, store
+
+    universe, sources = load_universe(), load_sources()
+    db_path = Path(args.db or (repo_root() / "data" / "pipeline.sqlite")).resolve()
+    if not db_path.exists():
+        print(f"no store at {db_path} - run `refresh` first", file=sys.stderr)
+        return 1
+    out = Path(args.out or (repo_root() / "web" / "public" / "data")).resolve()
+
+    conn = store.connect(db_path)
+    try:
+        store.assert_view_contract(conn)
+        rows = conn.execute("SELECT count(*) FROM raw_revenue").fetchone()[0]
+        written = export.write_all(conn, universe, sources, out)
+    finally:
+        conn.close()
+
+    print(f"export {db_path}  ->  {out}")
+    print(f"  store  : {rows} raw rows")
+    for name in ("meta.json", "analytics.json", "export.csv"):
+        print(f"  {name:16} {written[name]:>9,} bytes")
+    companies = sum(v for k, v in written.items() if k.startswith("company/"))
+    print(f"  company/*.json   {companies:>9,} bytes over "
+          f"{sum(1 for k in written if k.startswith('company/'))} files")
+    print(f"  total  : {sum(written.values()):,} bytes in {len(written)} files")
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     universe, sources = load_universe(), load_sources()
     company = universe[args.ticker]
@@ -539,6 +581,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--force", action="store_true",
                     help="persist even if the golden checks fail")
     sp.set_defaults(func=cmd_refresh)
+
+    sp = sub.add_parser("export", help="write the dashboard's data as static files")
+    common(sp, window=False)
+    sp.add_argument("--db", default=None,
+                    help="SQLite store path (default data/pipeline.sqlite)")
+    sp.add_argument("--out", default=None,
+                    help="output directory (default web/public/data)")
+    sp.set_defaults(func=cmd_export)
 
     sp = sub.add_parser("show", help="print one ticker's series from the cache")
     sp.add_argument("--ticker", required=True)
