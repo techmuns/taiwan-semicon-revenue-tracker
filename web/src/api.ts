@@ -23,7 +23,6 @@ import type {
   HeatmapMetric,
   Health,
   Meta,
-  Quality,
   TickerHeatmap,
 } from "./types";
 
@@ -125,8 +124,6 @@ export const api = {
   },
 
   company: (ticker: string) => get<CompanyDetail>(`/api/company/${encodeURIComponent(ticker)}`),
-
-  quality: () => get<Quality>("/api/quality"),
 
   /** Not fetched - handed to the browser as a download. */
   exportUrl: (f: FilterState) => `/api/export.csv?${filterParams(f)}`,

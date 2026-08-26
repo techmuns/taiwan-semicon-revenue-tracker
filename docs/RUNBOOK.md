@@ -121,7 +121,7 @@ a key on does not lock an open tab out immediately: it keeps serving cached 200s
 until they expire, and the first thing to 401 is a route that tab had never fetched.
 A 401 itself is `no-store`, so nothing caches the rejection. This is exactly how the
 2026-08-21 flip surfaced — as a lone `/api/company/5347 · HTTP 401` on a dashboard
-whose other five tabs still looked fine.
+whose other tabs still looked fine.
 
 ### Why not Cloudflare Access
 
@@ -154,7 +154,10 @@ figures.
 4. Upserts to `raw_revenue` tagged with `source_id`, gated on `row_hash`.
 5. Falls back to the per-company MOPS endpoint for any tier-1 ticker still
    missing.
-6. Writes `quality_findings`.
+6. Writes `quality_findings`. Anything at `error` or `warn` reaches the reader
+   automatically: `/api/meta.alerts.severe_findings` carries it and `AlertStrip`
+   draws it above the content on every tab. `info` findings stay out of the UI —
+   each one is already stated in `universe.notes` on the company it concerns.
 
 If `_P` ever does start carrying listed companies, the switch shows up in
 `raw_revenue.source_id` with no code change.
@@ -356,8 +359,12 @@ misread.
 - **`3661` and `6415` file on a consolidated basis** with a non-TWD functional
   currency; the TWD column is taken. Their *levels* are therefore not directly
   comparable with the standalone filers. Raised as `CONSOLIDATED_BASIS` info
-  findings on the Quality tab, once per company-month, so it is impossible to
-  quote a level without having been told.
+  findings, once per company-month. The UI reads those findings back through
+  `/api/meta.alerts.consolidated` and footnotes the two places a level is
+  actually summed - the Summary revenue tile and the Data table - rather than
+  listing them, so it is impossible to quote a level without having been told.
+  The list is derived from the findings, not hardcoded, so a third such filer
+  footnotes itself.
 
 ---
 
@@ -427,10 +434,9 @@ Rules the implementation holds to:
 - **Both views take the same data**, in the same shape, from the same fetch
   (`MatrixTable` takes the `HeatRow[]` the `Heatmap` takes; `SeriesTable` takes
   the aligned arrays the charts take). They cannot disagree.
-- **The Data and Quality tabs have no toggle** and this is not an omission. The
-  Data tab *is* the table view — column for column identical to the CSV export —
-  and drawing twelve columns of mixed units as one chart would need a dual axis.
-  The Quality tab holds coverage states and log rows, not series.
+- **The Data tab has no toggle** and this is not an omission. It *is* the table
+  view — column for column identical to the CSV export — and drawing twelve
+  columns of mixed units as one chart would need a dual axis.
 - Table mode adds what a chart cannot show: the stage index table carries the
   per-month **constant-membership count** as a second column, so a month that is
   thin rather than weak is visible rather than inferred.
@@ -497,7 +503,7 @@ All read-only. `GET` only; anything else returns 405.
 | `/api/analytics?from&to&tickers&buckets&tiers&only_with_data` | The twelve columns, in spec order. |
 | `/api/heatmap?metric&group=bucket\|ticker&agg=weighted\|equal` | Aggregated cells. |
 | `/api/company/:ticker` | Full series, raw rows, restatements. |
-| `/api/quality` | Coverage matrix, findings, fetch log. The UI reads everything but `fetch_log`, which is kept for operators reading the JSON directly. |
+| `/api/quality` | Coverage matrix, findings, fetch log. **Operator-only — no UI reader.** Kept because this table is the record when a cron run looks wrong, and the post-deploy check below curls it. What a reader needs from it rides on `/api/meta.alerts` instead. |
 | `/api/export.csv?…` | The twelve columns with a UTF-8 BOM so Excel opens it correctly. |
 
 Responses carry `Cache-Control: public, max-age=300`. The data changes monthly,

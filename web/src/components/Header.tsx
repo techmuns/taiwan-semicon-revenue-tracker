@@ -86,7 +86,6 @@ export const TABS = [
   { value: "company", label: "Company", title: "One name, full series and raw filings" },
   { value: "buckets", label: "Buckets", title: "Supply-chain stages, rebased" },
   { value: "data", label: "Data", title: "The twelve columns, sortable, exportable" },
-  { value: "quality", label: "Quality", title: "Coverage, gaps, findings, provenance" },
 ] as const;
 
 export type Tab = (typeof TABS)[number]["value"];

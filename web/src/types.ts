@@ -53,6 +53,25 @@ export interface FreshnessRow {
   last_seen_utc: string | null;
 }
 
+/**
+ * What the reader has to be told, wherever they are. Lives on /api/meta because
+ * meta is in hand on every tab and there is no Quality tab left to open.
+ */
+export interface Alerts {
+  /** A filed month missing between two filed months: the fetch failed, not the filer. */
+  interior_gaps: { ticker: string; display_name: string; month: string }[];
+  /** error and warn only - `info` is per-company colour, already on the company. */
+  severe_findings: {
+    severity: string;
+    code: string;
+    ticker: string | null;
+    month: string | null;
+    message: string;
+  }[];
+  /** Filers whose revenue LEVELS are not comparable with the standalone filers. */
+  consolidated: { ticker: string; display_name: string }[];
+}
+
 export interface FindingCount {
   severity: string;
   code: string;
@@ -76,6 +95,7 @@ export interface Meta {
   sources: SourceSummary[];
   freshness: FreshnessRow[];
   findings_by_code: FindingCount[];
+  alerts: Alerts;
   access: AccessPosture;
   units: { revenue: string; percentages: string; acceleration: string };
 }
@@ -193,56 +213,10 @@ export interface CompanyDetail {
   restatements: RestatementRow[];
 }
 
-export interface QualityMatrixCell {
-  ticker: string;
-  display_name: string;
-  bucket: string;
-  tier: number;
-  status: string;
-  month: string;
-  has_data: number;
-  source_id: string | null;
-}
-
-export interface InteriorGap {
-  ticker: string;
-  display_name: string;
-  status: string;
-  month: string;
-}
-
-export interface Finding {
-  run_id: string;
-  created_at_utc: string;
-  severity: string;
-  code: string;
-  month: string | null;
-  ticker: string | null;
-  source_id: string | null;
-  message: string;
-}
-
-export interface FetchLogRow {
-  source_id: string;
-  month: string;
-  fetches: number;
-  ok_n: number;
-  fail_n: number;
-  last_fetch_utc: string | null;
-}
-
-export interface Quality {
-  coverage: {
-    cells: number;
-    with_data: number;
-    pct: number | null;
-    trackable_cells: number;
-    trackable_with_data: number;
-    trackable_pct: number | null;
-    known_absent: { ticker: string; month: string; status: string }[];
-  };
-  matrix: QualityMatrixCell[];
-  interior_gaps: InteriorGap[];
-  findings: Finding[];
-  fetch_log: FetchLogRow[];
-}
+/*
+ * The /api/quality types used to live here. The endpoint still exists and still
+ * returns the coverage matrix, every finding and the fetch log - it is the
+ * operator's record and the runbook's post-deploy check curls it - but nothing
+ * in the UI reads it any more. What a reader needs from it now arrives on
+ * /api/meta as `alerts`, above.
+ */

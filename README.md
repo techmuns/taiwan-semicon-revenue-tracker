@@ -115,8 +115,14 @@ December's YoY. It is stored and excluded from the default window.
 
 ## The dashboard
 
-Six tabs, one shared filter state, all of it in the URL — so any view can be
+Five tabs, one shared filter state, all of it in the URL — so any view can be
 sent to someone else and arrive identical.
+
+There is no Quality tab. Data-integrity signals do not sit behind a click,
+because the reader who most needs them — the one about to quote a number — is
+the one least likely to go looking. A missing month or an `error`/`warn` finding
+draws a strip above the content on **whichever tab is open**, and nothing renders
+when nothing is wrong.
 
 | Tab | What it answers |
 |---|---|
@@ -125,7 +131,6 @@ sent to someone else and arrive identical.
 | Company | One name: series, and the as-filed rows every number came from |
 | Buckets | Rebased revenue index per stage, ten facets on one shared scale |
 | Data | The twelve columns, sortable, identical to the CSV export |
-| Quality | Automated findings, and the coverage matrix (which flags interior gaps) |
 
 Every chart can be **redrawn as a table of numbers** — one toggle per screen,
 graph by default, `viz=table` in the URL when it isn't. It exists because a

@@ -22,6 +22,7 @@
  */
 
 import { WidgetCard } from "./WidgetCard";
+import { consolidatedNote } from "./AlertStrip";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
 import { forMonth, medianOf, sumRevenue, weightedYoY } from "../stats";
 import { metricSpec } from "../scale";
@@ -91,6 +92,7 @@ export function Kpis({
   const monthRows = forMonth(rows, latestMonth);
   const universeN = meta?.universe.length ?? 0;
   const trackable = meta?.universe.filter((u) => u.status === "active").length ?? 0;
+  const note = consolidatedNote(meta?.alerts);
   const spec = metricSpec(metric);
   /** The stage cells are in the metric's own unit, which is not always ppt. */
   const stageValue = (v: number | null) => (spec.unit === "ppt" ? ppt(v) : pct(v));
@@ -183,6 +185,22 @@ export function Kpis({
             <Cell key={k.label} {...k} />
           ))}
         </div>
+        {/* Universe revenue is a SUM, and two of the names summed into it file
+            consolidated in a foreign currency. That caveat used to be visible
+            only if you opened those two companies - which is not where anyone
+            would misread it. It belongs against the total. */}
+        {note && (
+          <div
+            style={{
+              padding: "6px 12px",
+              borderTop: "1px solid var(--border)",
+              fontSize: 10,
+              color: "var(--text-hint)",
+            }}
+          >
+            {note}
+          </div>
+        )}
       </WidgetCard>
     </div>
   );

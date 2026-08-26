@@ -2,10 +2,14 @@
  * The composition root: three zones, one shared view state, one fetch per widget
  * that needs one.
  *
- * Each tab is its own component so its queries mount with it - switching to Quality
- * does not fetch the heatmap, and switching away cancels nothing that matters. The
- * only query hoisted to this level is `/api/analytics`, because four of the six tabs
- * read it and the filter row reports its row count.
+ * Each tab is its own component so its queries mount with it - switching to Company
+ * does not fetch the bucket heatmap, and switching away cancels nothing that
+ * matters. The only query hoisted to this level is `/api/analytics`, because four
+ * of the five tabs read it and the filter row reports its row count.
+ *
+ * AlertStrip sits above all of them rather than on a tab of its own. A tab is a
+ * place you have to decide to go; a data problem has to reach whoever is looking
+ * at revenue, wherever that is.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -35,7 +39,7 @@ import { Kpis } from "./components/Kpis";
 import { Insights } from "./components/Insights";
 import { DataTable } from "./components/DataTable";
 import { CompanyPanel } from "./components/CompanyPanel";
-import { QualityPanel } from "./components/QualityPanel";
+import { AlertStrip, consolidatedNote } from "./components/AlertStrip";
 import { Buckets } from "./components/Buckets";
 import { MethodAndUnits } from "./components/Method";
 import type { AnalyticsRow, BucketHeatmap, HeatmapMetric, Meta, TickerHeatmap } from "./types";
@@ -140,7 +144,7 @@ export default function App() {
   // One graph/table mode for the whole dashboard. See ViewToggle for why it is shared.
   const setViz = (viz: ViewMode) => setView((v) => ({ ...v, viz }));
 
-  const showFilters = view.tab !== "quality" && view.tab !== "company";
+  const showFilters = view.tab !== "company";
 
   // Placed after every hook above on purpose - an early return before them would
   // break the rules of hooks. The queries they hold are harmless while locked: each
@@ -184,6 +188,10 @@ export default function App() {
           </WidgetCard>
         ) : (
           <>
+            {/* Above the filters, so it is the first thing read on whichever
+                tab happens to be open. Renders nothing when nothing is wrong. */}
+            <AlertStrip alerts={meta.data?.alerts} />
+
             {showFilters && (
               <FilterBar
                 meta={meta.data}
@@ -284,13 +292,19 @@ export default function App() {
                       ) : null
                     }
                   >
-                    {(d) => <DataTable rows={d.rows} onSelect={openCompany} maxHeight={TABLE_H_DATA} />}
+                    {(d) => (
+                      <DataTable
+                        rows={d.rows}
+                        onSelect={openCompany}
+                        maxHeight={TABLE_H_DATA}
+                        note={consolidatedNote(meta.data?.alerts)}
+                      />
+                    )}
                   </AsyncBody>
                 </WidgetCard>
               </div>
             )}
 
-            {view.tab === "quality" && <QualityTab />}
           </>
         )}
       </main>
@@ -692,28 +706,3 @@ function CompanyBody({ ticker, viz }: { ticker: string; viz: ViewMode }) {
   return <CompanyPanel detail={detail.data} viz={viz} />;
 }
 
-// ------------------------------------------------------------------- quality --
-
-function QualityTab() {
-  const quality = useApi(() => api.quality(), []);
-  return (
-    // Grid inside the callback - see the Buckets tab for why. QualityPanel emits
-    // six cards, two of which ask to span two columns; nesting them one level
-    // deeper stacked all six in a single 340px column and dropped the spans.
-    <AsyncBody
-      state={quality}
-      onRetry={quality.reload}
-      skeleton={
-        <div style={GRID}>
-          <ShimmerBlock height={240} />
-        </div>
-      }
-    >
-      {(q) => (
-        <div style={GRID}>
-          <QualityPanel quality={q} />
-        </div>
-      )}
-    </AsyncBody>
-  );
-}

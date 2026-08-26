@@ -142,10 +142,13 @@ const COLS: Col[] = [
 ];
 
 export function DataTable({
+  note,
   rows,
   onSelect,
   maxHeight = 560,
 }: {
+  /** Caveat that qualifies the Revenue column - see consolidatedNote. */
+  note?: string | null;
   rows: AnalyticsRow[];
   onSelect: (ticker: string) => void;
   maxHeight?: number | string;
@@ -380,6 +383,20 @@ export function DataTable({
           </tfoot>
         </table>
       </div>
+      {/* Under the table rather than above it: this qualifies the Revenue
+          column and the Average beneath it, both of which are read last. */}
+      {note && (
+        <div
+          style={{
+            padding: "6px 12px",
+            borderTop: "1px solid var(--border)",
+            fontSize: 10,
+            color: "var(--text-muted)",
+          }}
+        >
+          {note}
+        </div>
+      )}
     </div>
   );
 }

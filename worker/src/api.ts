@@ -118,7 +118,8 @@ async function health(env: Env) {
 // -------------------------------------------------------------------- /meta --
 
 async function meta(env: Env) {
-  const [universe, months, sources, freshness, findings] = await env.DB.batch<any>([
+  const [universe, months, sources, freshness, findings, gaps, severe, consolidated] =
+    await env.DB.batch<any>([
     env.DB.prepare(
       `SELECT ticker, display_name, name_zh, bucket, tier, market_hint, status,
               successor, thesis, notes, sort_order
@@ -146,6 +147,50 @@ async function meta(env: Env) {
         GROUP BY severity, code ORDER BY
           CASE severity WHEN 'error' THEN 1 WHEN 'warn' THEN 2 ELSE 3 END, code`,
     ),
+    /*
+     * The three reader-facing alerts. They live on /api/meta rather than
+     * /api/quality because meta is fetched once and is in hand on every tab,
+     * and because there is no longer a Quality tab to open: a problem has to
+     * reach whoever is looking at revenue, wherever they happen to be looking.
+     *
+     * Interior gaps: a month with no data that has data SOMEWHERE before and
+     * SOMEWHERE after. Trailing absence is a pending filing and leading absence
+     * is a name that joined the window late; neither is a defect. Bounding
+     * against each ticker's first and last filed month rather than comparing
+     * with LAG/LEAD is what lets it see a gap more than one month wide.
+     */
+    env.DB.prepare(
+      `WITH r AS (
+         SELECT ticker,
+                MIN(CASE WHEN has_data = 1 THEN month_idx END) AS first_idx,
+                MAX(CASE WHEN has_data = 1 THEN month_idx END) AS last_idx
+           FROM analytics_base GROUP BY ticker
+       )
+       SELECT b.ticker, b.display_name, b.month
+         FROM analytics_base b JOIN r ON r.ticker = b.ticker
+        WHERE b.has_data = 0
+          AND b.month_idx > r.first_idx
+          AND b.month_idx < r.last_idx
+        ORDER BY b.ticker, b.month_idx`,
+    ),
+    // error and warn only. `info` findings are per-company colour - the
+    // consolidated-basis and no-filing-obligation notes - and every one of them
+    // is already stated in universe.notes on the company itself.
+    env.DB.prepare(
+      `SELECT severity, code, ticker, month, message
+         FROM quality_findings WHERE severity IN ('error', 'warn')
+        ORDER BY CASE severity WHEN 'error' THEN 1 ELSE 2 END, code, month, ticker
+        LIMIT 20`,
+    ),
+    // Filers whose revenue LEVELS are not comparable with the standalone
+    // filers. Read off the findings rather than hardcoded, so a third such
+    // name entering the universe footnotes itself.
+    env.DB.prepare(
+      `SELECT DISTINCT f.ticker, u.display_name
+         FROM quality_findings f JOIN universe u ON u.ticker = f.ticker
+        WHERE f.code = 'CONSOLIDATED_BASIS' AND f.ticker IS NOT NULL
+        ORDER BY u.sort_order`,
+    ),
   ]);
 
   const allMonths: string[] = months.results.map((r: any) => r.month);
@@ -163,6 +208,11 @@ async function meta(env: Env) {
     sources: sources.results,
     freshness: freshness.results,
     findings_by_code: findings.results,
+    alerts: {
+      interior_gaps: gaps.results,
+      severe_findings: severe.results,
+      consolidated: consolidated.results,
+    },
     access: accessPosture(env),
     // Stated once, here, so no consumer has to guess at the scale.
     units: {
