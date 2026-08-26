@@ -33,12 +33,21 @@ binding = "DB"
 database_name = "taiwan-semicon-revenue"
 database_id = "da985a76-0e1a-4100-abd4-48c21687c290"
 
-# UTC. Taiwan's filing deadline is the 10th of the following month, so the 11th
-# is the first day the month is complete; the 14th and 18th sweep up late filers
-# and restatements. Three runs are safe because every write is gated on row_hash,
-# so a run that finds nothing new writes nothing.
-[triggers]
-crons = ["0 1 11,14,18 * *"]
+# NO [triggers] BLOCK, DELIBERATELY.
+#
+# `crons = ["0 1 11,14,18 * *"]` used to sit here and never registered once: the
+# account is at the Workers Free ceiling of five cron triggers PER ACCOUNT, so
+# every deploy ended in `code: 10072`. The error was expected and therefore
+# indistinguishable from a real one, which is its own cost - deploys are clean
+# again now.
+#
+# The refresh runs on GitHub Actions instead (.github/workflows/refresh.yml),
+# on the same 11/14/18 cadence, and writes to this same D1 database through the
+# API. D1 is untouched by that move and stays the store of record; only the
+# schedule left Cloudflare.
+#
+# Re-adding a trigger here would fail the same way, and would double-run the
+# refresh if the account ever freed a slot.
 
 # The dashboard, built by `npm run build` in web/ straight into public/.
 #

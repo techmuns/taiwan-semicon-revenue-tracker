@@ -172,12 +172,17 @@ npx wrangler secret put DASHBOARD_KEY --cwd worker
 
 Effective on the next request, no deploy. See [Access](docs/RUNBOOK.md#access).
 
-The monthly refresh runs on **GitHub Actions**, not on a Cloudflare cron — the
-account is at the Workers Free ceiling of 5 cron triggers per account, so the
-Worker's schedule never registered and not one refresh ever fired. Actions has
-no such cap, and no subrequest budget either, so it scrapes all 36 trackable
-names from MOPS *and* reads the OpenAPI feeds, which is what finally gives the
-cross-source check two independent readings of the same filing to compare. The
-store is a SQLite file on the orphan branch `pipeline-state`, running the same
-migrations D1 runs. Written up in
-[docs/RUNBOOK.md](docs/RUNBOOK.md#the-monthly-refresh-runs-on-github-actions).
+The monthly refresh runs on **GitHub Actions**, not on a Cloudflare cron. The
+account is at the Workers Free ceiling of 5 cron triggers *per account*, so the
+Worker's schedule never registered and not one refresh ever fired; Actions has
+no such cap. **D1 is unchanged** — it is still the store of record, the Worker
+still answers every endpoint out of it, and the run applies its seed to that
+same database. D1's own limits were never close: ~300 rows written a month
+against 100,000 a day, and 200 KB of a 5 GB allowance.
+
+Actions is also the better host for the scrape. The Worker had a subrequest
+budget, which is why it only repaired tier-1 names; a runner has none, so the
+run reads all 36 trackable names from MOPS *and* the OpenAPI feeds — which is
+what finally gives the cross-source check two independent readings of one filing
+to compare. Written up in
+[docs/RUNBOOK.md](docs/RUNBOOK.md#the-monthly-refresh-runs-on-github-actions-d1-is-unchanged).

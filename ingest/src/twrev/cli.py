@@ -394,16 +394,18 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         # the golden numbers are the cheapest way to notice.
         all_rows = [dict(r) for r in conn.execute(
             "SELECT * FROM raw_revenue WHERE source_id = ?", (bf.mc.SOURCE_ID,))]
-        # The gate anchors on one reference cell, so it can only speak once that
-        # cell is in the store. On a first run - an empty store refreshing a
-        # single month - its absence means "new store", not "bad data", and
-        # failing there would make the pipeline impossible to bootstrap.
+        # One assertion in the gate anchors on a reference cell, so it can only
+        # speak when that cell is in scope - a single-month refresh legitimately
+        # will not contain it. Only THAT assertion is waived. The units, type,
+        # column-completeness and month_idx checks apply to any rows at all and
+        # stay on, because waiving the whole set over an out-of-scope month is
+        # how a units change would slip through unnoticed.
         gt, gm = seed.GOLDEN_KEY
         have_golden = any(r["ticker"] == gt and r["month"] == gm for r in all_rows)
-        problems = seed.golden_checks(all_rows) if have_golden else []
+        problems = seed.golden_checks(all_rows, require_golden_row=have_golden)
         if not have_golden:
-            print(f"  golden : skipped - store has no {gt}/{gm} yet "
-                  f"({len(all_rows)} rows). Restore pipeline-state to enable it.")
+            print(f"  golden : {gt}/{gm} not in scope; units, type and column "
+                  f"checks still applied to {len(all_rows)} rows")
     finally:
         conn.close()
 
@@ -423,6 +425,26 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     # exist to collect the stragglers. Failing the job on one flaky company
     # would cry wolf twice a month. Past MAX_SOFT_FAILURES it is no longer
     # flakiness, and a human should look.
+    # ------------------------------------------------------- the D1 seed --
+    #
+    # D1 remains the store of record and the dashboard keeps querying it; what
+    # moved to GitHub Actions is the SCHEDULE, because the Cloudflare account is
+    # at its ceiling of five cron triggers and the Worker's handler was never
+    # registered. Nothing about D1's own limits was ever the problem: this
+    # writes about 100 rows a run against an allowance of 100,000 a day.
+    #
+    # The seed is built from the same `report` the gates above just passed, so
+    # what is applied is exactly what was validated - not a second parse that
+    # could differ.
+    if args.seed_out:
+        out = Path(args.seed_out).resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        sql = seed.build(universe=universe, report=report, sources=sources)
+        out.write_text(sql, encoding="utf-8")
+        print(f"  seed   : {out} ({len(sql):,} bytes, {len(report.rows)} rows)")
+        print(f"  apply  : npx wrangler d1 execute taiwan-semicon-revenue "
+              f"--remote --file={out}")
+
     hard = [f for f in report.findings if f["severity"] == "error"
             and f["code"] != "FETCH_FAILED"]
     stragglers = sorted({t for t, _, _ in report.failures})
@@ -580,6 +602,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--force-refetch", action="store_true")
     sp.add_argument("--force", action="store_true",
                     help="persist even if the golden checks fail")
+    sp.add_argument("--seed-out", default=None, metavar="PATH",
+                    help="also emit D1 seed SQL for the scraped month")
     sp.set_defaults(func=cmd_refresh)
 
     sp = sub.add_parser("export", help="write the dashboard's data as static files")

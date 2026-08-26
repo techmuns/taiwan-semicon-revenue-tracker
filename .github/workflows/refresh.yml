@@ -1,20 +1,26 @@
 # Monthly revenue refresh.
 #
-# This replaced a Cloudflare Worker cron that never ran a single time. The
-# account sits at the Workers Free ceiling of five cron triggers per account, so
-# `wrangler deploy` reported `code: 10072` and the scheduled handler was never
-# registered. A GitHub Actions schedule has no such cap.
+# THE SCHEDULE MOVED TO GITHUB; THE DATABASE DID NOT.
 #
-# It is also the better home for the scrape on its merits. The Worker had a
+# D1 is still the store of record and the Worker still answers every endpoint
+# out of it. What moved here is deciding when to run and doing the scraping,
+# because the Cloudflare account sits at the Workers Free ceiling of five cron
+# triggers per account - `wrangler deploy` reported `code: 10072`, the Worker's
+# scheduled handler was never registered, and not one refresh ever fired.
+#
+# D1's own limits were never close to the problem, and it is worth writing the
+# numbers down so nobody re-litigates this later. Measured against the real
+# store: one run writes about 100 rows against an allowance of 100,000 a day
+# (0.3% of a single day's budget, per month); a dashboard page load reads about
+# 1,900 rows against 5,000,000 a day, roughly 2,600 page loads before the cap;
+# storage is 200 KB of 5 GB. What was exhausted was a quota on scheduled jobs.
+#
+# Actions is also the better host for the scrape on its merits. The Worker had a
 # subrequest budget, which is why its repair path fetched MOPS for tier-1 names
-# only; a runner has no such budget, so this fetches all 36 trackable names from
-# MOPS *and* reads the OpenAPI feeds, which is what finally gives the
-# cross-source check two independent renderings of the same filing to compare.
-#
-# The store is a SQLite file carried on the orphan branch `pipeline-state`. It
-# is the same schema D1 runs - `store.connect()` applies worker/migrations/*.sql
-# verbatim - and the two engines were diffed at 296 company-months x 12 columns
-# with zero divergences before this was written.
+# only. A runner has none, so this reads all 36 trackable names from MOPS *and*
+# the OpenAPI feeds - which is what finally gives the cross-source check two
+# independent renderings of one filing to compare. Under the Worker no
+# company-month was ever carried by two sources, so that check had nothing to do.
 
 name: refresh
 
@@ -30,20 +36,22 @@ on:
         description: "Month to refresh (YYYY-MM). Blank = latest due by the 10th."
         required: false
         type: string
-      force:
-        description: "Persist even if the golden checks fail"
+      dry_run:
+        description: "Scrape and validate, but do not write to D1"
         required: false
         type: boolean
         default: false
 
-# A second run starting while the first is mid-scrape would race on the state
-# branch and could force-push a store built from a partial read.
+# Two runs applying seeds to the same database concurrently is the one way this
+# can corrupt anything, so they queue instead.
 concurrency:
   group: refresh
   cancel-in-progress: false
 
+# Read-only. Nothing is pushed back to the repository any more - the data lives
+# in D1, and the only write this job makes is through the Cloudflare API.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   refresh:
@@ -64,6 +72,23 @@ jobs:
       - name: Install
         run: pip install -r ingest/requirements.txt
 
+      # Fail here, loudly, rather than 20 minutes later inside wrangler with an
+      # authentication error that reads like a Cloudflare outage. The token must
+      # come from the account that owns the Worker (a441977d...), not from any
+      # other account the operator happens to be logged into - we have already
+      # been bitten once by a token pointing somewhere else.
+      - name: Check the Cloudflare token is present
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it under" \
+                 "Settings > Secrets and variables > Actions, from the account" \
+                 "that owns the Worker. It needs D1 edit permission."
+            exit 1
+          fi
+
       # The scrape cache is the audit artifact - the bytes MOPS actually served.
       # Restoring it makes a same-month re-run free and instant, which matters
       # because the most common reason to re-run is a transient failure on two
@@ -75,93 +100,69 @@ jobs:
           key: mops-cache-${{ github.run_id }}
           restore-keys: mops-cache-
 
-      # `data/pipeline.sqlite` lives on an orphan branch, force-pushed each run,
-      # so the store is durable without the repo's main history carrying a
-      # binary that changes every month. A missing branch is the first-run case,
-      # not an error: `refresh` creates the file from the migrations.
-      - name: Restore SQLite store
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p data
-          if git fetch --depth=1 origin pipeline-state 2>/dev/null; then
-            git show FETCH_HEAD:pipeline.sqlite > data/pipeline.sqlite
-            echo "restored $(stat -c%s data/pipeline.sqlite) bytes"
-          else
-            echo "no pipeline-state branch yet - starting a fresh store"
-          fi
-
       # The dispatch inputs arrive as environment variables and are branched on
-      # in shell, rather than interpolated into the middle of the command line.
-      # `${{ inputs.* }}` is only defined for workflow_dispatch, and this
-      # workflow also has a `schedule` trigger - referencing a context that does
-      # not exist for one of a workflow's triggers is a startup failure, which
-      # reports no job and no log and is therefore near-undebuggable. Env vars
-      # are defined under every trigger and empty is just empty.
-      - name: Refresh
+      # in shell rather than interpolated into the command line. `${{ inputs.* }}`
+      # is only defined for workflow_dispatch and this workflow also has a
+      # `schedule` trigger; referencing a context that does not exist under one
+      # of a workflow's triggers is a startup failure, which reports no job and
+      # no log and is near-undebuggable. Run 1 died exactly that way.
+      #
+      # The SQLite file here is scratch, not state: it exists so the analytics
+      # view can be executed and the column contract asserted before anything is
+      # written to D1. The seed it emits is built from the same report those
+      # gates just passed, so what gets applied is what was validated.
+      - name: Scrape and validate
         env:
           PYTHONPATH: ingest/src
           MONTH: ${{ github.event.inputs.month }}
-          FORCE: ${{ github.event.inputs.force }}
         run: |
-          args=(--db data/pipeline.sqlite)
+          args=(--db "$RUNNER_TEMP/validate.sqlite" --seed-out "$RUNNER_TEMP/seed.sql")
           [ -n "$MONTH" ] && args+=(--month "$MONTH")
-          [ "$FORCE" = "true" ] && args+=(--force)
           echo "running: twrev.cli refresh ${args[*]}"
           python -m twrev.cli refresh "${args[@]}"
 
-      # The dashboard reads these files instead of calling an API. Writing them
-      # here rather than at deploy time means the data and the code that
-      # produced it land in the same commit, and Cloudflare rebuilds from main
-      # with no database in the request path.
-      - name: Export static JSON
+      - uses: actions/setup-node@v4
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        with:
+          node-version: "20"
+
+      # `--remote` is the production database. The account id is pinned in
+      # wrangler.toml, so a token for the wrong account fails here rather than
+      # quietly creating a second Worker somewhere else.
+      #
+      # Every raw_revenue write is an upsert gated on row_hash and the other
+      # DELETEs are scoped to the month being refreshed, so re-applying the same
+      # seed converges rather than duplicating, and a single-month seed cannot
+      # touch the months either side of it.
+      - name: Apply to D1
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
-          PYTHONPATH: ingest/src
-        run: python -m twrev.cli export --db data/pipeline.sqlite --out web/public/data
-
-      - name: Commit the export
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add web/public/data
-          # A refresh that changed nothing is the normal case before the filing
-          # deadline, and an empty commit would be noise in the history.
-          if git diff --cached --quiet; then
-            echo "no data change"
-          else
-            git commit -qm "data: refresh $(date -u +%Y-%m-%d)"
-            git push -q origin HEAD:main
-            echo "pushed $(git diff --stat HEAD~1 HEAD -- web/public/data | tail -1)"
-          fi
+          npx --yes wrangler@4 d1 execute taiwan-semicon-revenue \
+            --remote --file="$RUNNER_TEMP/seed.sql" -c worker/wrangler.toml
 
-      # Single-commit orphan branch, built in a scratch repo. Force-pushing a
-      # fresh history each time is deliberate: the branch holds state, not a
-      # record, so accumulating monthly binary revisions would grow the
-      # repository forever for no one's benefit.
-      - name: Push SQLite store
+      # Reading back through the API rather than the database on purpose: it is
+      # the dashboard's own path, so this proves what a reader will actually
+      # see, not merely that rows landed in a table.
+      - name: Verify the dashboard sees it
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          MONTH: ${{ github.event.inputs.month }}
         run: |
-          tmp="$(mktemp -d)"
-          cp data/pipeline.sqlite "$tmp/pipeline.sqlite"
-          cd "$tmp"
-          git init -q
-          git checkout -q -b pipeline-state
-          git add pipeline.sqlite
-          git -c user.name="github-actions[bot]" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -qm "pipeline state @ $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git push -q --force \
-            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
-            pipeline-state
-          echo "pushed $(stat -c%s pipeline.sqlite) bytes to pipeline-state"
+          args=()
+          [ -n "$MONTH" ] && args+=(--month "$MONTH")
+          python3 ingest/tools/verify_live.py "${args[@]}"
 
-      # Kept regardless of outcome: when a run fails, the store as it stood and
-      # the bytes MOPS served are the only evidence of why.
-      - name: Upload store and findings
+      # When a run fails, the seed it built and the store it validated against
+      # are the only evidence of why.
+      - name: Upload the seed and validation store
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-state-${{ github.run_id }}
+          name: refresh-${{ github.run_id }}
           path: |
-            data/pipeline.sqlite
+            ${{ runner.temp }}/seed.sql
+            ${{ runner.temp }}/validate.sqlite
           retention-days: 30
           if-no-files-found: warn

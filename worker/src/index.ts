@@ -97,6 +97,21 @@ export default {
    * notice, so the error is logged with the expression that produced it and then
    * re-thrown to mark the invocation failed.
    */
+  /*
+   * NOTHING TRIGGERS THIS ANY MORE.
+   *
+   * wrangler.toml declares no [triggers] block: the account is at the Workers
+   * Free ceiling of five cron triggers per account, so this handler was never
+   * once registered and never once fired. The monthly refresh runs on GitHub
+   * Actions (.github/workflows/refresh.yml) and writes to the same D1 database
+   * through the API.
+   *
+   * The code is kept rather than deleted because it is tested and it is the
+   * fallback if a cron slot is ever freed - but adding the trigger back would
+   * then double-run the refresh against the Actions schedule, so read
+   * docs/RUNBOOK.md before doing it. It also still answers
+   * `wrangler dev --test-scheduled`, which is how it can be exercised locally.
+   */
   async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
     try {
       await runRefresh(env, event.cron);

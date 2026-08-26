@@ -8,25 +8,33 @@ Live: <https://taiwan-semicon-revenue.tech-441.workers.dev>
 
 ---
 
-## The monthly refresh runs on GitHub Actions
+## The monthly refresh runs on GitHub Actions; D1 is unchanged
 
 `.github/workflows/refresh.yml`, on the 11th, 14th and 18th at 01:00 UTC, plus
 `workflow_dispatch` for a manual run. It scrapes MOPS for every company, reads
-the three OpenAPI feeds as a second opinion, and writes a SQLite store.
+the three OpenAPI feeds as a second opinion, validates, and applies a seed to
+the **same D1 database the dashboard has always queried**.
 
 ```bash
-# manual run, from the Actions tab or:
-gh workflow run refresh -f month=2026-08
+gh workflow run refresh -f month=2026-08          # manual
+gh workflow run refresh -f dry_run=true           # scrape + validate, write nothing
 
-# locally, against a scratch store:
-PYTHONPATH=ingest/src python -m twrev.cli refresh --db /tmp/test.sqlite --month 2026-07
+# locally, end to end, writing nothing:
+PYTHONPATH=ingest/src python -m twrev.cli refresh \
+  --db /tmp/validate.sqlite --seed-out /tmp/seed.sql --month 2026-07
 ```
 
-### Why it is not a Cloudflare cron
+### What moved, and what did not
 
-Because that never ran. The account is at the Workers Free ceiling of **5 cron
-triggers per account** — the limit is per account, not per Worker, and the five
-were already spent elsewhere — so every `wrangler deploy` ended with:
+**The schedule moved. The database did not.** D1 remains the store of record,
+the Worker still answers every endpoint out of it, and the dashboard is
+untouched — including the bucket-heatmap SQL, which stays where it is and keeps
+running in the engine that already runs it correctly.
+
+### Why the Cloudflare cron had to go
+
+It never ran. The account is at the Workers Free ceiling of **5 cron triggers
+per account** — per account, not per Worker — so every deploy ended in:
 
 ```
 This account has reached the Workers Free limit of 5 cron triggers per account.
@@ -34,89 +42,122 @@ This account has reached the Workers Free limit of 5 cron triggers per account.
 ```
 
 The scheduled handler was therefore never registered and not one refresh ever
-fired. A GitHub Actions schedule has no such cap.
+fired. `wrangler.toml` now declares no `[triggers]` block at all, so deploys are
+clean again; `worker/src/index.ts` still carries the handler, marked dead, as
+the fallback if a slot is ever freed. **Do not re-add the trigger without
+disabling the Actions schedule** — they would double-run.
 
-It is also the better home on the merits. The Worker had a subrequest budget,
-which is why its repair path fetched MOPS for **tier-1 names only**; a runner has
-none, so the Actions run scrapes all 36 trackable names from MOPS *and* reads the
-feeds. That is what finally gives the cross-source check something to compare —
-see below.
+### D1's limits were never the problem
 
-To be clear about what this did **not** fix: this project was never near a rate
-limit. The store is 296 rows and ~192 KB against D1's 5M-row-reads/day free
-tier. What was exhausted was a quota on *scheduled jobs*, nothing else.
+Worth writing down so nobody re-litigates it. Measured against the real store:
 
-### The store
+| | Usage | Free allowance | Headroom |
+|---|---|---|---|
+| Writes | ~100 rows/run, ~300/month | 100,000/day | 0.3% of **one day's** budget, per month |
+| Reads | ~1,900 rows/page load | 5,000,000/day | ~2,600 page loads/day |
+| Storage | 200 KB | 5 GB | 0.004% |
 
-A SQLite file, `data/pipeline.sqlite`, carried on the orphan branch
-`pipeline-state` and force-pushed on every run. Force-push is deliberate: the
-branch holds state, not history, so a fresh single commit each month keeps the
-repository from growing a binary revision forever.
+What was exhausted was a quota on *scheduled jobs*. Nothing about the database.
 
-It is the **same schema D1 runs** — `store.connect()` applies
-`worker/migrations/*.sql` verbatim. The two engines were diffed before the
-switch: 296 company-months × 12 columns of `analytics_monthly`, **zero
-divergences**. `store.py` still describes itself as a verification harness in
-its docstring; that is how it began, and it is now the store of record.
+### Actions is also the better host for the scrape
 
-A first run with no `pipeline-state` branch is the bootstrap case, not an error:
-`refresh` creates the file from the migrations.
+The Worker had a subrequest budget, which is why its repair path fetched MOPS
+for **tier-1 names only**. A runner has none, so the Actions run reads all 36
+trackable names from MOPS *and* the feeds — and that is what finally gives the
+cross-source check something to compare.
 
-### Cross-source checking is real now
+Under the Worker it was structurally impossible: the feeds partition the
+universe (`t187ap05_L` carries 31 of the 37, `mopsfin_t187ap05_O` the other 5,
+and a company is 上市 or 上櫃 but never both) while `t187ap05_P`, the feed the
+brief names, carries **none** of them. MOPS only ran where the feeds had already
+missed, so no company-month was ever held by two sources. A verified run now
+reports **36 company-months carried by two sources, 0 disagreements**. A
+disagreement raises `SOURCE_DISAGREEMENT`, which reaches the reader through
+`AlertStrip` on every tab.
 
-Under the Worker it was structurally impossible. The feeds partition the
-universe — `t187ap05_L` carries 31 of the 37, `mopsfin_t187ap05_O` the other 5,
-and a company is 上市 or 上櫃 but never both — while `t187ap05_P`, the feed the
-brief names, carries **none** of them (it is the 公開發行公司 dataset). MOPS only
-ran for names the feeds had already missed, so no company-month was ever held by
-two sources and `openapi.compare` had nothing to compare.
+### The gates, in order
 
-Scraping every name via MOPS *and* reading the feeds gives the same cell from two
-independent renderings of one filing. A verified run: **36 company-months carried
-by two sources, 0 disagreements**. A disagreement raises
-`SOURCE_DISAGREEMENT`, which reaches the reader through `AlertStrip` on every
-tab.
+1. **Scrape** — MOPS for all 36 trackable names, plus one explicit retry pass
+   over cells that exhausted their attempts.
+2. **Cross-source** — every cell compared against the OpenAPI feeds.
+3. **Local view** — the seed's rows are loaded into a scratch SQLite built from
+   the real migrations, so `analytics_monthly` is *executed* and its 12-column
+   contract asserted before anything reaches D1.
+4. **Golden checks** — units, ticker types, column completeness, `month_idx`
+   agreement, and the `2330/2026-03 = 415,191,699` reference cell.
+5. **Apply** — `wrangler d1 execute --remote`.
+6. **Verify live** — `ingest/tools/verify_live.py` reads back through the public
+   API, not the database, because that is the reader's own path.
+
+A failure at 1–4 writes nothing.
 
 ### What fails the run, and what does not
 
-Three passes a month exist because filers trickle in and MOPS is intermittent.
-So a straggler is not a failure:
+Three passes a month exist because filers trickle in and MOPS is intermittent,
+so a straggler is not a failure:
 
 - Up to `MAX_SOFT_FAILURES` (3) missing cells → warn, exit 0, next pass collects them.
 - More than that, or any non-`FETCH_FAILED` error finding → exit 1.
-- Golden checks (`2330/2026-03`) failing → exit 1, nothing persisted.
+- Golden checks failing → exit 1, nothing applied.
 
-The golden gate is **skipped** when the store does not yet contain the reference
-cell, since on a fresh store its absence means "new store", not "bad data".
+The reference-cell assertion is waived when a single-month refresh legitimately
+cannot contain it; **the units, type and column checks always run**. Waiving the
+whole set over an out-of-scope month is how a units change would slip through.
 
-MOPS serves a block page on first contact and the real page on retry — expect
-`rejected` in the fetcher stats to run at roughly one per cell. `refresh` also
-does one explicit retry pass over cells that exhausted their attempts.
+### The seed cannot damage the months either side of it
+
+`raw_revenue` is an upsert gated on `row_hash` — no `DELETE` at all — and the
+`fetch_log` and `quality_findings` deletes are scoped to the month being
+refreshed. `universe`, `source_feed` and `source_config` are rewritten wholesale
+from the YAML on purpose, so config stays authoritative. Re-applying the same
+seed converges rather than duplicating.
 
 ### MOPS is User-Agent sniffed — do not "tidy" the headers
 
 MOPS returns *"FOR SECURITY REASONS, THIS PAGE CAN NOT BE ACCESSED"* to a default
 `curl` agent **and to a Linux Chrome agent**. It serves data only to the Windows
-Chrome UA in `http.py:DEFAULT_HEADERS`. This is UA sniffing, not an IP block —
-cloud runners are fine. Those headers are load-bearing.
+Chrome UA in `http.py:DEFAULT_HEADERS`. UA sniffing, not an IP block — cloud
+runners are fine. Those headers are load-bearing.
+
+It also serves a block page on first contact and the real page on retry, so
+expect `rejected` in the fetcher stats to run at roughly one per cell.
+
+### The secret
+
+`CLOUDFLARE_API_TOKEN`, a repository secret, from the account that owns the
+Worker (`a441977d…`) and with **D1 edit** permission. The workflow checks it is
+present and fails immediately with a clear message rather than surfacing an
+authentication error twenty minutes in.
 
 ### GitHub disables schedules after 60 days of repo inactivity
 
 A real hazard for a monthly job on a quiet repo: the workflow silently stops
-firing. `workflow_dispatch` is the manual escape hatch, and any push resets the
-clock.
+firing. `workflow_dispatch` is the escape hatch, and any push resets the clock.
 
-### Expect two restatements on the first production refresh
+### Expect two restatements on the first Actions refresh
 
 `3661` and `6415` file their 備註 note in the layout `RE_NOTE_KY` handles, which
-was added in `a976750` — *after* the current D1 rows were seeded. So the live
-rows carry `note = NULL` for those two and the refreshed rows carry the real
-text, which changes `row_hash` and trips the restatement trigger.
+was added in `a976750` — *after* the current D1 rows were seeded. The live rows
+carry `note = NULL`; the refreshed rows carry the real text, which changes
+`row_hash` and trips the restatement trigger.
 
 Verified: 34 of 36 company-months are byte-identical to D1 including `row_hash`;
 the two that differ, differ only in `note` and its hash, and the note is
 genuinely present in the MOPS bytes. This is the parser fix landing, **not** a
-filer revision. It will happen once.
+filer revision. It happens once.
+
+### There is also a static export, currently unused
+
+`twrev.cli export` writes the whole dashboard as files under `web/public/data`,
+and `ingest/tools/check_export_parity.py` proves it matches the live API exactly
+(analytics, meta, seven companies, and the CSV byte for byte — zero
+divergences). Nothing reads those files: the dashboard still calls the API.
+
+It is kept because it is the head start if this ever needs to leave Cloudflare
+entirely. Doing that would also require porting the bucket-heatmap aggregation
+into the browser, which is the one thing that cannot become a file — it
+aggregates over whatever filters are live, and ticker selection is an arbitrary
+subset of 37 names.
 
 ---
 
@@ -341,18 +382,12 @@ curl -s -o /dev/null -w 'unknown ticker -> %{http_code} (want 404)\n' "$B/api/co
 
 `npx wrangler rollback` reverts to the previous version if anything looks wrong.
 
-### The cron error on every deploy is expected — for now
+### Deploys are clean now
 
-The deploy still prints `This account has reached the Workers Free limit of 5
-cron triggers per account`, because `worker/wrangler.toml` still declares
-`crons`. It is not a failed deploy — wrangler says so itself: "Trigger
-configuration … was only partially updated" — and the Worker, its bindings and
-the assets all land. Do not retry on account of it.
-
-The refresh no longer depends on that trigger ever registering; it runs on
-GitHub Actions. The `crons` line and `worker/src/cron.ts` come out when the
-Worker is stripped back to `/health` plus assets, at which point this error
-stops appearing.
+They used to end in `This account has reached the Workers Free limit of 5 cron
+triggers per account`. `wrangler.toml` declares no `[triggers]` block any more —
+the refresh runs on GitHub Actions — so that error is gone. If it comes back,
+someone re-added `crons`, and it will fail for the same reason it always did.
 
 `web/` builds directly into `worker/public`, which the `[assets]` binding
 serves, so the SPA and the API share one origin — no CORS, no second host to

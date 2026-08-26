@@ -246,19 +246,29 @@ def build(
 GOLDEN_KEY = ("2330", "2026-03")
 
 
-def golden_checks(rows: list[dict[str, Any]]) -> list[str]:
+def golden_checks(
+    rows: list[dict[str, Any]], *, require_golden_row: bool = True
+) -> list[str]:
     """Assertions on the seeded rows that must hold before the file is trusted.
 
     Returns a list of failure messages; empty means the seed is safe to apply.
     These are the checks that catch a units change or a silent precision loss -
     the two failure modes that would otherwise look like plausible data.
+
+    `require_golden_row=False` for a caller whose row set legitimately cannot
+    contain the reference cell - a single-month refresh, say. Only that one
+    assertion is waived; the units, type, column-completeness and month_idx
+    checks apply to any rows at all and stay on. Waiving the whole set because
+    one month is out of scope is how a units change would slip through.
     """
     problems: list[str] = []
     by_key = {(r["ticker"], r["month"]): r for r in rows}
 
     golden = by_key.get(GOLDEN_KEY)
-    if golden is None:
+    if golden is None and require_golden_row:
         problems.append(f"golden row {GOLDEN_KEY[0]}/{GOLDEN_KEY[1]} absent from the seed")
+    elif golden is None:
+        pass
     else:
         expect = {
             "revenue_month": 415191699,
