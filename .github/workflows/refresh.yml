@@ -91,14 +91,24 @@ jobs:
             echo "no pipeline-state branch yet - starting a fresh store"
           fi
 
+      # The dispatch inputs arrive as environment variables and are branched on
+      # in shell, rather than interpolated into the middle of the command line.
+      # `${{ inputs.* }}` is only defined for workflow_dispatch, and this
+      # workflow also has a `schedule` trigger - referencing a context that does
+      # not exist for one of a workflow's triggers is a startup failure, which
+      # reports no job and no log and is therefore near-undebuggable. Env vars
+      # are defined under every trigger and empty is just empty.
       - name: Refresh
         env:
           PYTHONPATH: ingest/src
+          MONTH: ${{ github.event.inputs.month }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
-          python -m twrev.cli refresh \
-            --db data/pipeline.sqlite \
-            ${{ inputs.month && format('--month {0}', inputs.month) || '' }} \
-            ${{ inputs.force && '--force' || '' }}
+          args=(--db data/pipeline.sqlite)
+          [ -n "$MONTH" ] && args+=(--month "$MONTH")
+          [ "$FORCE" = "true" ] && args+=(--force)
+          echo "running: twrev.cli refresh ${args[*]}"
+          python -m twrev.cli refresh "${args[@]}"
 
       # The dashboard reads these files instead of calling an API. Writing them
       # here rather than at deploy time means the data and the code that
