@@ -8,6 +8,20 @@
       name="description"
       content="Monthly revenue across the Taiwanese AI semiconductor supply chain, from MOPS and TWSE/TPEx filings."
     />
+    <!--
+      Tab icon. SVG first, because it is one file that stays sharp at every
+      size a browser asks for; the 32px PNG is the fallback for Safari before
+      16.4, and apple-touch-icon is the iOS home screen, drawn on a square
+      field because iOS applies its own corner mask.
+
+      All three are real files under web/public, copied to worker/public by the
+      build and served by the asset binding BEFORE the Worker runs - so they
+      never reach the SPA fallback and never come back as index.html.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
     <!-- No custom fonts: system-ui only, per the dashboard UI standard. -->
     <!-- Tells the UA to render form controls and the canvas for both themes, so
          a scrollbar or a <select> is not left light on a dark page. -->

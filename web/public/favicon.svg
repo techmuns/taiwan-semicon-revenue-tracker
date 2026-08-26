@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img"
+     aria-label="Taiwan semiconductor revenue tracker">
+  <!--
+    Read at 16px first, then at 32 and 180.
+
+    A favicon is a 16px mark before it is anything else, so the composition is
+    two shapes: a full-bleed indigo tile, which is what makes it findable in a
+    strip of white tabs, and three ascending bars, which is the only thing that
+    survives at that size. The pin ticks along the top and bottom edges are the
+    chip package. They blur into texture at 16px and resolve into pins at 32 and
+    above, which is the right way round - they add identity where there is room
+    and cost nothing where there is not.
+
+    Colours are literal, not tokens: a favicon is rendered by the browser chrome
+    with no stylesheet. Indigo #4f46e5 is --primary, the one accent this
+    dashboard uses, and it holds its own against both a light and a dark tab bar
+    - which is why the tile is coloured and the marks are white, rather than the
+    other way round.
+  -->
+  <rect width="32" height="32" rx="7" fill="#4f46e5"/>
+  <g fill="#ffffff" opacity="0.42">
+    <rect x="8" y="0" width="3" height="2.6" rx="0.7"/>
+    <rect x="14.5" y="0" width="3" height="2.6" rx="0.7"/>
+    <rect x="21" y="0" width="3" height="2.6" rx="0.7"/>
+    <rect x="8" y="29.4" width="3" height="2.6" rx="0.7"/>
+    <rect x="14.5" y="29.4" width="3" height="2.6" rx="0.7"/>
+    <rect x="21" y="29.4" width="3" height="2.6" rx="0.7"/>
+    <rect x="0" y="8" width="2.6" height="3" rx="0.7"/>
+    <rect x="0" y="14.5" width="2.6" height="3" rx="0.7"/>
+    <rect x="0" y="21" width="2.6" height="3" rx="0.7"/>
+    <rect x="29.4" y="8" width="2.6" height="3" rx="0.7"/>
+    <rect x="29.4" y="14.5" width="2.6" height="3" rx="0.7"/>
+    <rect x="29.4" y="21" width="2.6" height="3" rx="0.7"/>
+  </g>
+  <g fill="#ffffff">
+    <rect x="6"  y="18" width="5.5" height="8"  rx="1.5"/>
+    <rect x="13.25" y="13" width="5.5" height="13" rx="1.5"/>
+    <rect x="20.5" y="7"  width="5.5" height="19" rx="1.5"/>
+  </g>
+</svg>
