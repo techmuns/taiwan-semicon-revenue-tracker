@@ -41,29 +41,93 @@ consolidation:
   - parent: "3231"          # Wistron
     child: "6669"           # Wiwynn
     treatment: consolidated
-    stake: "~35-40%"
+    stake: "40.13% group / 35.45% held directly by Wistron Corp (2025-06-30)"
     confidence: high
     evidence: >-
-      Wistron's 2026-03 filed revenue of 333,043,315 (TWD thousands) is exactly the
-      NT$3,330.43億 reported in the press, in the same report that describes Wiwynn's
-      986.49億 as 「子公司緯穎」. Wistron's share disposals were filed as
-      「未導致緯創對緯穎喪失控制力」 - control retained, so Wiwynn stays inside the
-      consolidated statements despite the sub-50% stake.
+      Wistron 2025 Q2 consolidated financial statements, Note 4(b) "List of
+      subsidiaries in the consolidated financial statements", lists Wiwynn
+      Corporation ("WYHQ") at 40.13%, with Note 3 stating verbatim: "WYHQ, a
+      subsidiary of the Group, is a publicly listed company, where the Group is
+      the first major shareholder, with voting rights accounted for nearly half
+      of the total shares present. The remaining shares are dispersed and there
+      is no collective decision-making agreement. The Group determines that it
+      has control over WYHQ." The same note ends "(ii) Subsidiaries excluded from
+      consolidated: None." Confirmed from the other side by Wiwynn's own 2025 Q2
+      consolidated statements, Note 7(a): "Wistron Corporation is the parent
+      company and the ultimate controlling party of the Group. As of June 30,
+      2025 ... it owns 35.45% ... of all shares outstanding of the Company."
+      Arithmetic is consistent: Wistron's 2026-07 filed revenue is 308,219,198
+      and Wiwynn's is 117,685,530, i.e. 38.2% of the parent's - a share only a
+      consolidated subsidiary can reach.
 
 # Pairs CHECKED AND CLEARED. These are not double counts and must NOT be excluded
 # from aggregates. Recorded so the check is not repeated and so nobody "fixes" a
 # non-problem by pattern-matching on the ownership percentage.
+#
+# Note what these four have in common and how they differ from the pair above: the
+# stakes run from 0.86% to 34.84% and NONE of them consolidates, while a 35-40%
+# stake does. Percentage does not decide it; the parent's own statements do.
 cleared:
   - parent: "2330"          # TSMC
     child: "3443"           # Global Unichip
     treatment: equity_method
-    stake: "~35%"
+    stake: "34.84%"
     confidence: high
     evidence: >-
-      TSMC's consolidated financial statements list Global Unichip among investments
-      accounted for using the EQUITY METHOD (voting-rights proportion 0.35). TSMC held
-      52% at GUC's 2003 acquisition and fell below 50% after GUC's 2006 TWSE listing.
-      GUC's revenue is therefore NOT inside TSMC's reported revenue.
+      GUC's audited FY2025 consolidated financial statements, Note 28 (related
+      party transactions), categorise the counterparty verbatim as "Taiwan
+      Semiconductor Manufacturing Co., Ltd. (TSMC) - An investor that accounts
+      for its investment in GUC by using the equity method". TSMC's 2024 annual
+      report carries GUC under equity-method investments at 34.84%. TSMC held
+      52.0% at the January 2003 acquisition and was diluted below control at
+      GUC's November 2006 TWSE listing. GUC files its own MOPS monthly revenue
+      and its 2026-07 figure is 1.2% of TSMC's - a ratio that says nothing on its
+      own, which is exactly why the statements decide it.
+
+  - parent: "2330"          # TSMC
+    child: "5347"           # VIS
+    treatment: equity_method
+    stake: "~19%, was ~27.1% before May 2026"
+    confidence: high
+    evidence: >-
+      GUC's FY2025 consolidated statements, same Note 28 table, categorise
+      "Vanguard International Semiconductor Corporation (VIS) - An associate of
+      TSMC" - contrast the same table's "VisEra Technologies Co., Ltd. - A
+      subsidiary of TSMC". TSMC's annual reports have carried VIS as an
+      equity-method associate since the 2000s. In May 2026 TSMC sold up to 152.0m
+      VIS shares, cutting the stake from ~27.1% to ~19%; some Taiwanese press
+      described this as 不必再合併報表, which is imprecise - the change is a loss
+      of significant influence (equity method to FVOCI), not a deconsolidation,
+      because VIS was never consolidated. VIS files its own MOPS revenue.
+
+  - parent: "2303"          # UMC
+    child: "3037"           # Unimicron
+    treatment: equity_method
+    stake: "~13.01%"
+    confidence: high
+    evidence: >-
+      UMC is Unimicron's largest single shareholder, and its December 2025 board
+      resolution to subscribe to Unimicron's cash capital increase describes
+      Unimicron as UMC's 關聯企業 (associate, i.e. equity method), with the
+      holding remaining at ~13.01% after the raise. The arithmetic settles it
+      independently: Unimicron's 2026-07 revenue of 16,253,637 is 68% of UMC's
+      total reported 23,844,045. If UMC consolidated Unimicron, UMC's entire
+      foundry business would have to be ~7.6bn a month, which it is not - UMC's
+      reported figure IS its foundry business.
+
+  - parent: "3231"          # Wistron
+    child: "3661"           # Alchip
+    treatment: fvoci
+    stake: "0.86%"
+    confidence: high
+    evidence: >-
+      Recorded only to close the loop on the one other intra-universe
+      shareholding found. Wistron's 2025 Q2 consolidated statements, Table 3
+      "Market Securities Held (excluding investment in subsidiaries, associates
+      and joint ventures)", carry Alchip Technologies at 690k shares / 0.86% as a
+      non-current financial asset at fair value through other comprehensive
+      income. Explicitly outside subsidiaries, associates and joint ventures, so
+      there is no equity pickup and no revenue consolidation.
 
 # ------------------------------------------------------------------ other edges --
 #

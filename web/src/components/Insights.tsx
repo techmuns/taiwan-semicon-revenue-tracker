@@ -42,7 +42,7 @@ import { EmptyState } from "./states";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
 import { forAggregate, forMonth, standouts, sumRevenue, weightedYoY } from "../stats";
 import { cellStyle, metricSpec } from "../scale";
-import { CONSOLIDATION, consolidationNote } from "../generated/relationships";
+import { CLEARED, CONSOLIDATION, consolidationNote } from "../generated/relationships";
 import { SEGMENTS } from "../generated/segments";
 import type { AnalyticsRow, BucketCell, HeatmapMetric } from "../types";
 
@@ -478,6 +478,52 @@ function Relationships() {
               ))}
             </tbody>
           </table>
+          {/*
+            The cleared pairs are shown, not hidden. The intuitive rule - a big
+            stake means the revenue is inside the parent's - is wrong, and these
+            are the counter-examples sitting right beside the one pair where it
+            happens to hold. Someone who sees only "Wistron consolidates Wiwynn"
+            and knows TSMC owns a third of GUC will reasonably conclude the
+            dashboard has missed one.
+          */}
+          {CLEARED.length > 0 && (
+            <div style={{ borderTop: "1px solid var(--border)" }}>
+              <div
+                className="eyebrow"
+                style={{ padding: "8px 14px 2px", color: "var(--text-hint)" }}
+              >
+                Checked and cleared — held, not consolidated
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <tbody>
+                  {CLEARED.map((c) => (
+                    <tr key={`${c.parent}-${c.child}`}>
+                      <td style={{ padding: "3px 8px 3px 14px", color: "var(--text-secondary)" }}>
+                        {c.parentName} → {c.childName}
+                        <span style={{ color: "var(--text-hint)" }}> · {c.stake}</span>
+                      </td>
+                      <td
+                        style={{
+                          padding: "3px 14px 3px 8px",
+                          textAlign: "right",
+                          fontSize: 10.5,
+                          color: "var(--text-hint)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {c.treatment === "equity_method"
+                          ? "equity method"
+                          : c.treatment === "fvoci"
+                            ? "fair value, passive"
+                            : c.treatment}{" "}
+                        — not inside the parent
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {/*
             The supplier / competitor graph is NOT here, and its absence is the
             deliberate part. Those edges drive "a related company moved sharply,

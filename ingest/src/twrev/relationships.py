@@ -77,7 +77,7 @@ class Relationships:
         return None
 
 
-VALID_TREATMENTS = {"consolidated", "equity_method", "unclear"}
+VALID_TREATMENTS = {"consolidated", "equity_method", "fvoci", "unclear"}
 VALID_CONFIDENCE = {"high", "medium", "low"}
 VALID_KINDS = {"supplies", "competes"}
 
@@ -275,6 +275,31 @@ def render_ts(rel: Relationships, universe: Universe) -> str:
     ]
     for t in rel.excluded_from_aggregates:
         lines.append(f'  "{t}",   // inside {name.get(rel.parent_of(t) or "", "?")}')
+    lines += [
+        "];",
+        "",
+        "/**",
+        " * Pairs CHECKED AND CLEARED - held, but not consolidated, so NOT double counts.",
+        " *",
+        " * Carried into the UI on purpose. The intuitive rule - a big stake means the",
+        " * revenue is inside the parent's - is wrong here, and these are the counter",
+        " * examples: stakes from 0.86% to 34.84%, none consolidating, against a 35-40%",
+        " * stake that does. Showing them is what stops someone \"fixing\" a non-problem.",
+        " */",
+        "export interface ClearedPair extends ConsolidationPair {",
+        "  treatment: string;",
+        "  stake: string;",
+        "}",
+        "",
+        "export const CLEARED: readonly ClearedPair[] = [",
+    ]
+    for c in sorted(rel.cleared, key=lambda c: (c.parent, c.child)):
+        lines.append(
+            f'  {{ parent: "{c.parent}", child: "{c.child}", '
+            f'parentName: "{name.get(c.parent, c.parent)}", '
+            f'childName: "{name.get(c.child, c.child)}", '
+            f'treatment: "{c.treatment}", stake: "{c.stake}" }},'
+        )
     lines += [
         "];",
         "",
