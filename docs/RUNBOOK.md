@@ -333,6 +333,124 @@ worked example: it appears in the universe with every cell an em dash.
 Tickers are **quoted strings** in the YAML. An unquoted `2330` becomes the
 integer 2330 and stops matching anything.
 
+### Check an edit before it ships
+
+```bash
+cd ingest && PYTHONPATH=src python -m twrev.cli validate
+```
+
+Offline, under a second, no network and no database. It checks all four config
+files — universe, sources, relationships, segments — and asserts that the
+TypeScript generated from the last two is current. Add `--write` to regenerate.
+
+This is the gate between a typo and a wrong stage on the published site, because
+a `bucket:` edit is live after the next refresh with no code change and no
+review step of its own. CI runs the same command without `--write`.
+
+---
+
+## Relationships and de-duplication
+
+`config/relationships.yaml` records which tracked companies contain which other
+tracked companies. It exists because the dashboard SUMS 37 names, and that is
+only correct if no name's reported revenue already includes another's.
+
+One does. **Wistron (3231) consolidates Wiwynn (6669)**, and both file monthly.
+Measured on 2026-07 against the live store:
+
+| | counting both | de-duplicated |
+|---|---|---|
+| Universe revenue | 2,705,290,452 | 2,587,604,922 (**4.55% lower**) |
+| Rack / ODM revenue | 1,873,094,715 | 1,755,409,185 (**6.28% lower**) |
+| Rack / ODM weighted YoY | 65.68% | **67.81%** |
+| Rack / ODM acceleration | +5.39 ppt | +4.98 ppt |
+
+An entry removes the child from **sums only** — the universe total, the Worker's
+per-stage aggregate, the Buckets stage index and the segment aggregate. The
+child's own row, series, acceleration, Data-tab line and CSV row are untouched,
+because a subsidiary's own filed revenue is perfectly real.
+
+### The test is accounting treatment, not ownership percentage
+
+This is the trap, and the intuitive rule is wrong. Two pairs in this universe
+have nearly identical stakes and opposite answers:
+
+- TSMC (2330) holds **~35%** of Global Unichip (3443) → **equity method**. GUC's
+  revenue is *not* inside TSMC's. Not a double count.
+- Wistron (3231) holds **~35–40%** of Wiwynn (6669) → **consolidated**. Control
+  is retained (the disposals were filed as 「未導致緯創對緯穎喪失控制力」), so
+  Wiwynn's revenue *is* inside Wistron's. A double count.
+
+Only the parent's consolidated statements settle it. The cleared pair is
+recorded in the same file precisely so nobody "fixes" a non-problem later by
+pattern-matching on the stake.
+
+### Adding a pair
+
+**Adding a pair deletes revenue from a headline total.** Getting it wrong in the
+eager direction is worse than the bug it fixes, so the loader enforces six
+invariants and each has a test that proves it raises: no self-consolidation, at
+most one parent per child, no cycles, no pair in both lists, `treatment:
+consolidated` required in `consolidation`, and both sides present in the
+universe. Then:
+
+```bash
+cd ingest && PYTHONPATH=src python -m twrev.cli validate --write
+```
+
+Commit the YAML **and** the two generated files
+(`web/src/generated/relationships.ts`, `worker/src/generated/relationships.ts`).
+
+### Why this is generated TypeScript and not a D1 column
+
+A `consolidated_into` column on `universe` would be the obvious design and is
+the wrong one here. Migrations are applied **by hand, outside CI**, while the
+monthly refresh is automated — and the seed applies as a **single transaction**.
+A seed referencing a column D1 did not have yet would abort the whole month's
+revenue update, turning a cosmetic ordering problem into a missed filing month.
+A build-time constant compiled into both bundles cannot fail that way.
+
+The supplier/competitor edges in the same file are **empty on purpose**. They
+would drive "a related company moved sharply, check this one" flags, and an edge
+asserted from memory produces confident-looking alerts founded on a guess.
+
+---
+
+## Segments
+
+`config/segments.yaml` defines named slices of the universe — the shipped one is
+a 12-company high-performance-compute pilot spanning seven stages. Adding
+another is two file edits and `validate --write`; the walkthrough is
+[SEGMENT_PILOT.md](SEGMENT_PILOT.md).
+
+**Know what a segment figure is before quoting one.** It is the sum of its
+members' **total** revenue, not their revenue in that segment. The monthly
+filing is one consolidated number per company — no product line, no end market,
+no geography — so "TSMC's HPC revenue in July" is not in this pipeline and
+cannot be derived from it. That number lives in the quarterly IFRS 8 segment
+note: a different source, a different cadence, and a **data-sourcing project**
+rather than a visualization change.
+
+`Segment.basis` is a required field for exactly that reason, and every surface
+that renders a segment renders it. The `observations:` list is where a
+hand-transcribed split would go; it requires a `source` and an `as_of`, it is
+empty, and a test asserts it stays empty so that a figure cannot become a
+segment split without someone deliberately updating that test.
+
+---
+
+## CI
+
+`.github/workflows/ci.yml`, on every push and pull request. Python tests, then
+`twrev validate` (config + generated-file drift), then the web build (theme
+parity → `tsc` → vite) and the Worker typecheck.
+
+Everything in it is **offline**: `conftest.py` forces `TWREV_OFFLINE=1`, so no
+check can pass because MOPS happened to be up or fail because it happened to be
+down. Before this existed the monthly refresh was the only workflow in the repo,
+which meant a broken parser or view would surface on the 11th, inside the one
+job whose purpose is writing that month's data to production.
+
 ---
 
 ## Deploying
@@ -443,6 +561,20 @@ misread.
   prior_month_yoy_pct` instead of a difference of two independent roundings. The
   reported fields are retained in `raw_revenue` and shown in the company tab's
   "As filed" table purely as a cross-check.
+- **Sums across companies exclude consolidated subsidiaries.** Wiwynn's revenue
+  is inside Wistron's, so the universe total, the stage aggregates, the stage
+  index and the segment aggregate all count it once. Per-company views count it
+  normally — its own filed revenue is its own. See *Relationships and
+  de-duplication* above.
+- **The Insights tab's "standout stage" is a ranking, not a significance test.**
+  It scores each stage against the median and MAD of the other stages *in the
+  same month*, in MAD units. It is deliberately not a z-score against a stage's
+  own history: at n=7 months the largest |z| a sample can produce is 2.268, so a
+  3-sigma alert could never fire and a 2-sigma one fires on the series maximum or
+  minimum every time — measured on the live store, 100% of |z| > 2 flags were the
+  series max or min, and lag-1 autocorrelation was −0.310. Ten stages is also far
+  too few to quote a false-positive rate for, and they are not independent draws.
+  The panel says "most unlike the others" and never says "significant".
 - **Aggregates are revenue-weighted from levels, never an average of
   percentages**, with numerator and denominator summed over the *identical*
   member set. Summing all revenue over one set and all prior-year revenue over

@@ -36,7 +36,9 @@ import { Heatmap } from "./components/Heatmap";
 import type { HeatRow } from "./components/Heatmap";
 import { MatrixTable } from "./components/tables";
 import { Kpis } from "./components/Kpis";
+import { Movers } from "./components/Movers";
 import { Insights } from "./components/Insights";
+import { consolidationNote } from "./generated/relationships";
 import { DataTable } from "./components/DataTable";
 import { CompanyPanel } from "./components/CompanyPanel";
 import { AlertStrip, consolidatedNote } from "./components/AlertStrip";
@@ -218,6 +220,20 @@ export default function App() {
               />
             )}
 
+            {view.tab === "insights" && (
+              <InsightsTab
+                meta={meta.data}
+                filters={view.filters}
+                rows={rows}
+                latestMonth={latestMonth}
+                metric={view.metric}
+                agg={view.agg}
+                onMetric={(metric) => setView((v) => ({ ...v, metric }))}
+                onAgg={(agg) => setView((v) => ({ ...v, agg }))}
+                onSelect={openCompany}
+              />
+            )}
+
             {view.tab === "acceleration" && (
               <AccelerationTab
                 filters={view.filters}
@@ -346,6 +362,7 @@ function OverviewTab({
     [JSON.stringify(filters), metric, agg],
   );
   const spec = metricSpec(metric);
+  const order = stageOrder(meta);
 
   return (
     <>
@@ -369,6 +386,9 @@ function OverviewTab({
           full
           staticCard
           bodyStyle={{ overflow: "hidden" }}
+          // The stage aggregate is a sum, and one member's revenue is inside
+          // another's. The Worker excludes it; this says so where the number is.
+          footnote={consolidationNote()}
           actions={
             <>
               <Segmented
@@ -407,7 +427,7 @@ function OverviewTab({
               viz === "table" ? (
                 <MatrixTable
                   months={months}
-                  rows={bucketRows(d)}
+                  rows={bucketRows(d, order)}
                   metric={metric}
                   rowHeader="Stage"
                   maxHeight={MATRIX_H_OVERVIEW}
@@ -415,7 +435,7 @@ function OverviewTab({
               ) : (
                 <Heatmap
                   months={months}
-                  rows={bucketRows(d)}
+                  rows={bucketRows(d, order)}
                   metric={metric}
                   rowHeader="Stage"
                   maxHeight={MATRIX_H_OVERVIEW}
@@ -425,12 +445,12 @@ function OverviewTab({
           </AsyncBody>
         </WidgetCard>
 
-        {/* Rendered bare, exactly as the Acceleration tab does it. Insights emits
+        {/* Rendered bare, exactly as the Acceleration tab does it. Movers emits
             TWO cards, so wrapping it in AsyncBody made both share one grid cell
             and stacked Decelerating underneath Accelerating in a 340px column.
             `rows` is already the resolved analytics payload and both panels
             handle an empty list, so the wrapper bought nothing. */}
-        <Insights rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />
+        <Movers rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />
 
         {meta && <MethodAndUnits meta={meta} />}
       </div>
@@ -438,11 +458,42 @@ function OverviewTab({
   );
 }
 
+/**
+ * Supply-chain order for the stage rows, read off `meta.universe`.
+ *
+ * The universe arrives sorted by `sort_order`, which encodes the chain: silicon
+ * -> packaging -> substrate -> rack -> networking -> thermal -> power ->
+ * equipment -> the two control groups. First appearance of each stage in that
+ * list therefore IS the chain order, with no second list to keep in sync.
+ *
+ * `/api/heatmap` returns `ORDER BY bucket`, i.e. alphabetically, so without this
+ * the Overview matrix read AI Silicon, Advanced Packaging, Analog Cycle, Legacy,
+ * Networking, Power, Rack, Semi Equipment, Substrate, Thermal - which puts the
+ * control group in the middle of the chain and separates substrate from the rack
+ * it feeds. The Buckets tab was already in chain order, so the same ten stages
+ * came out in two different sequences on two tabs.
+ */
+function stageOrder(meta: Meta | null): string[] {
+  const seen: string[] = [];
+  for (const c of meta?.universe ?? []) {
+    if (!seen.includes(c.bucket)) seen.push(c.bucket);
+  }
+  return seen;
+}
+
 /** Bucket cells -> heatmap rows. Detail lines carry the basis for the number. */
-function bucketRows(d: BucketHeatmap): HeatRow[] {
+function bucketRows(d: BucketHeatmap, order: string[]): HeatRow[] {
   const by = groupBy(d.cells, (c) => c.bucket);
+  // A stage the order does not know about sorts after the ones it does, rather
+  // than to the top: indexOf returns -1, which would put an unrecognised stage
+  // first. That case is a universe.yaml edit that has not reached the browser
+  // yet, so it should be visible at the end, not leading the chain.
+  const rank = (b: string) => {
+    const i = order.indexOf(b);
+    return i === -1 ? order.length : i;
+  };
   return [...by.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
     .map(([bucket, cells]) => ({
       key: bucket,
       label: bucket,
@@ -472,6 +523,128 @@ function bucketRows(d: BucketHeatmap): HeatRow[] {
 }
 
 // -------------------------------------------------------------- acceleration --
+
+/**
+ * The Insights tab.
+ *
+ * It asks /api/heatmap for the same bucket aggregate the Overview chart draws,
+ * with the same filters, metric and weighting - deliberately the same request,
+ * so the browser cache serves it and the two tabs can never disagree about a
+ * stage's number. Recomputing the aggregate here would be a second
+ * implementation of the paired-predicate CTE, which is the one piece of SQL in
+ * this repo that has already shipped a sign inversion.
+ */
+/**
+ * Two columns on a wide screen, one on a narrow one - not the shared GRID.
+ *
+ * GRID is minmax(340px, 1fr), which at a normal desktop width lays out three
+ * columns. The Insights cards are ranked tables that want roughly half the
+ * screen each, and `wide` (span 2 of 3) left a third of the viewport empty
+ * beside them. 560px floors this at two columns at 1200px and above and folds
+ * to one below, which is what these two cards actually want; `full` still spans
+ * the row whatever the count.
+ */
+const INSIGHTS_GRID: CSSProperties = {
+  ...GRID,
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 560px), 1fr))",
+};
+
+function InsightsTab({
+  meta,
+  filters,
+  rows,
+  latestMonth,
+  metric,
+  agg,
+  onMetric,
+  onAgg,
+  onSelect,
+}: {
+  meta: Meta | null;
+  filters: FilterState;
+  rows: AnalyticsRow[];
+  latestMonth: string | null;
+  metric: HeatmapMetric;
+  agg: "weighted" | "equal";
+  onMetric: (m: HeatmapMetric) => void;
+  onAgg: (a: "weighted" | "equal") => void;
+  onSelect: (ticker: string) => void;
+}) {
+  const heat = useApi(
+    () => api.bucketHeatmap(filters, metric, agg),
+    [JSON.stringify(filters), metric, agg],
+  );
+  const spec = metricSpec(metric);
+
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 8,
+          marginBottom: "var(--grid-gap)",
+        }}
+      >
+        <div style={{ fontSize: 11, color: "var(--text-hint)", lineHeight: 1.45, maxWidth: 620 }}>
+          Ranked on <strong>{spec.label}</strong>, {agg === "weighted"
+            ? "revenue-weighted"
+            : "equal-weighted, one company one vote"}
+          . Changing the metric changes what “stands out” means, which is the point: a stage can
+          lead on growth and trail on acceleration in the same month.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Segmented
+            options={METRIC_OPTIONS}
+            value={metric}
+            onChange={onMetric}
+            ariaLabel="Ranking metric"
+          />
+          <Segmented
+            options={[
+              { value: "weighted", label: "NT$", title: "Weight each company by revenue" },
+              { value: "equal", label: "Equal", title: "One company, one vote" },
+            ]}
+            value={agg}
+            onChange={onAgg}
+            ariaLabel="Aggregation"
+          />
+        </div>
+      </div>
+
+      {/* GRID goes INSIDE the callback. AsyncBody renders one <div>, and
+          Insights emits four cards - as a direct grid child that div would be a
+          single minmax(340px, 1fr) cell with all four cards stacked inside it,
+          and WidgetCard's `wide` would be silently ignored because gridColumn
+          only does anything for a DIRECT grid child. The Buckets tab hit exactly
+          this and the comment there is why this one is written this way. */}
+      <AsyncBody
+        state={heat}
+        onRetry={heat.reload}
+        skeleton={
+          <div style={INSIGHTS_GRID}>
+            <ShimmerBlock height={260} />
+          </div>
+        }
+      >
+        {(d) => (
+          <div style={INSIGHTS_GRID}>
+            <Insights
+              rows={rows}
+              bucketCells={d.cells}
+              latestMonth={latestMonth}
+              metric={metric}
+              onSelect={onSelect}
+            />
+            {meta && <MethodAndUnits meta={meta} />}
+          </div>
+        )}
+      </AsyncBody>
+    </>
+  );
+}
 
 function AccelerationTab({
   filters,
@@ -561,7 +734,7 @@ function AccelerationTab({
         </AsyncBody>
       </WidgetCard>
 
-      <Insights rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />
+      <Movers rows={rows} latestRows={forMonth(rows, latestMonth)} onSelect={onSelect} />
     </div>
   );
 }

@@ -41,13 +41,28 @@ lifecycle. A delisting is a YAML edit, never a code change.
 ## Layout
 
 ```
-config/universe.yaml   the editable ticker universe, shared by both halves
-config/sources.yaml    endpoint URLs + ongoing-source precedence
-ingest/                Python 3.12 - one-time backfill + per-ticker repair tool
-worker/                Cloudflare Worker - JSON API, monthly cron, static assets
-web/                   React + Vite + TS dashboard, built into worker/public
-docs/RUNBOOK.md        operations, open items, how to read the numbers
+config/universe.yaml      the editable ticker universe - stage, tier, lifecycle
+config/sources.yaml       endpoint URLs + ongoing-source precedence
+config/relationships.yaml who contains whom - drives de-duplication of totals
+config/segments.yaml      named slices of the universe, e.g. the HPC pilot
+ingest/                   Python 3.12 - backfill, monthly refresh, config checks
+worker/                   Cloudflare Worker - JSON API over D1, static assets
+web/                      React + Vite + TS dashboard, built into worker/public
+docs/RUNBOOK.md           operations, open items, how to read the numbers
+docs/SEGMENT_PILOT.md     how to add a themed slice, and what its number means
 ```
+
+The four `config/*.yaml` files are the editing surface. A stage change, a
+delisting, a new segment or a newly-verified parent/subsidiary pair is a YAML
+edit plus one command — never a code change and never a migration:
+
+```bash
+cd ingest && PYTHONPATH=src python -m twrev.cli validate --write
+```
+
+`validate` checks every file offline in under a second and regenerates the
+TypeScript constants the browser and the Worker import. Without `--write` it
+asserts those generated files are current, which is what CI runs.
 
 The split is on **request volume**, which the source choice dictates. The
 backfill is 296 serially-throttled HTML requests — far beyond a Worker's CPU and
@@ -115,7 +130,7 @@ December's YoY. It is stored and excluded from the default window.
 
 ## The dashboard
 
-Five tabs, one shared filter state, all of it in the URL — so any view can be
+Six tabs, one shared filter state, all of it in the URL — so any view can be
 sent to someone else and arrive identical.
 
 There is no Quality tab. Data-integrity signals do not sit behind a click,
@@ -127,6 +142,7 @@ when nothing is wrong.
 | Tab | What it answers |
 |---|---|
 | Overview | Which stage of the chain is inflecting, and a summary of the latest month |
+| Insights | Which stage is most unlike the others this month, who inside it is large enough to be driving it, and the segment pilot |
 | Acceleration | Company × month, strongest latest month first |
 | Company | One name: series, and the as-filed rows every number came from |
 | Buckets | Rebased revenue index per stage, ten facets on one shared scale |
@@ -138,6 +154,28 @@ figure that is going to be quoted should be read rather than estimated off an
 axis, and because it is the accessibility relief for the one series hue that
 falls under the 3:1 contrast floor. Nulls render as an em dash and never as
 zero, in either view.
+
+## Totals are de-duplicated
+
+The dashboard sums 37 companies. That is only correct if no company's reported
+revenue already contains another's — and one does: **Wistron consolidates
+Wiwynn**, and both file. Counting both overstated the universe total by 4.55%
+and the Rack / ODM stage by 6.70%, and pulled that stage's revenue-weighted YoY
+from a true 67.81% to 65.68%.
+
+Every **sum across companies** now excludes the child: the universe total, the
+per-stage aggregate in the Worker's SQL, the stage index on the Buckets tab and
+the segment aggregate. Nothing else changes — Wiwynn's own row, series,
+acceleration and place in the Data tab and the CSV are all exactly as filed,
+because a subsidiary's own revenue is perfectly real. It is only *adding* it to
+its parent's that double counts.
+
+The test is **accounting treatment, not ownership percentage**, and that is the
+trap. Two pairs in this universe have nearly identical stakes and opposite
+answers: TSMC holds ~35% of Global Unichip and equity-methods it (not a double
+count); Wistron holds ~35–40% of Wiwynn and consolidates it (a double count).
+Both are recorded in `config/relationships.yaml`, the second so nobody
+"fixes" a non-problem by pattern-matching on the stake.
 
 ## Tests
 

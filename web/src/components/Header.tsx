@@ -83,6 +83,7 @@ function ThemeToggle() {
 
 export const TABS = [
   { value: "overview", label: "Overview", title: "Where the chain is inflecting" },
+  { value: "insights", label: "Insights", title: "What stands out this month, and who is inside it" },
   { value: "acceleration", label: "Acceleration", title: "Company x month, YoY acceleration" },
   { value: "company", label: "Company", title: "One name, full series and raw filings" },
   { value: "buckets", label: "Buckets", title: "Supply-chain stages, rebased" },
