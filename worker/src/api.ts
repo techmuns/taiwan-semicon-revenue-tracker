@@ -17,6 +17,7 @@
  */
 
 import { accessPosture, type AccessEnv } from "./access";
+import { EXCLUDED_FROM_AGGREGATES } from "./generated/relationships";
 import { addMonths } from "./normalize";
 
 export interface Env extends AccessEnv {
@@ -423,6 +424,29 @@ async function heatmap(env: Env, url: URL) {
     { ...f, from: addMonths(f.from, -1) },
     { prefix: "b", revenueCol: "revenue_month" },
   );
+
+  // Drop companies whose revenue is ALREADY INSIDE another tracked company's
+  // reported figure before anything is summed. Wistron consolidates Wiwynn, so
+  // Rack / ODM was counting Wiwynn's revenue twice - once standalone and once
+  // inside Wistron - which overstated the stage's revenue by 6.7% and pulled its
+  // revenue-weighted growth toward the double-counted member.
+  //
+  // It goes in the CTE's WHERE rather than into each conditional aggregate on
+  // purpose: the paired-predicate invariant this query depends on requires every
+  // numerator and its denominator to be summed over a TEXTUALLY IDENTICAL
+  // predicate, and adding a term to nine of them by hand is exactly how that
+  // stops being true. Excluding the row before the aggregates see it keeps all
+  // nine pairs identical to each other for free, and keeps `members_*` honest -
+  // an excluded member is not counted, so no denominator claims it.
+  //
+  // Only aggregates are touched. group=ticker above, /api/analytics, the CSV and
+  // the company detail all still return Wiwynn's own rows unchanged, because a
+  // subsidiary's own filed revenue is perfectly real - it is only ADDING it to
+  // its parent's that double counts.
+  const excludeSql = EXCLUDED_FROM_AGGREGATES.length
+    ? ` AND b.ticker NOT IN ${inClause(EXCLUDED_FROM_AGGREGATES.length)}`
+    : "";
+  const excludeBinds = [...EXCLUDED_FROM_AGGREGATES];
   // Aggregate per bucket-month from the LEVELS, then difference consecutive
   // months for acceleration - the same recompute-from-integers rule the
   // per-ticker view follows, applied one level up.
@@ -482,7 +506,7 @@ async function heatmap(env: Env, url: URL) {
               AVG(b.yoy_pct) AS yoy_equal,
               AVG(b.mom_pct) AS mom_equal
          FROM analytics_base b
-        WHERE ${sql}
+        WHERE ${sql}${excludeSql}
         GROUP BY b.bucket, b.month, b.month_idx
        HAVING members > 0
      ),
@@ -522,7 +546,7 @@ async function heatmap(env: Env, url: URL) {
     // The lookback month's own row is discarded here, after it has served as the
     // LAG for the first displayed month. Bound last because it is the last
     // placeholder in the statement text.
-    .bind(...binds, f.from)
+    .bind(...binds, ...excludeBinds, f.from)
     .all();
 
   // Map the requested metric onto the column the aggregation produced, so the

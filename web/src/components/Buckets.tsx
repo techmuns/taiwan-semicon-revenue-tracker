@@ -31,7 +31,8 @@ import type { ViewMode } from "./controls";
 import { SeriesTable } from "./tables";
 import { EmptyState } from "./states";
 import { monthLabel } from "../format";
-import { groupBy, sortedMonths } from "../stats";
+import { forAggregate, groupBy, sortedMonths } from "../stats";
+import { consolidationNote } from "../generated/relationships";
 import type { AnalyticsRow } from "../types";
 
 interface StageIndex {
@@ -101,7 +102,13 @@ export function Buckets({
   onViz: (v: ViewMode) => void;
 }) {
   const months = sortedMonths(rows);
-  const byBucket = groupBy(rows, (r) => r.bucket);
+  // The index is a RATIO OF TWO SUMS over the stage's members, so a company
+  // whose revenue is already inside another member's has to come out before the
+  // sum, exactly as it does for the universe total and the stage heatmap.
+  // Wiwynn inside Wistron put Rack / ODM's own growth into its index twice,
+  // over-weighting one member's path in a line that is supposed to describe the
+  // stage. Every other tab still shows Wiwynn's own series in full.
+  const byBucket = groupBy(forAggregate(rows), (r) => r.bucket);
   // Chain order, NOT alphabetical. /api/analytics already delivers rows in
   // supply-chain sequence via `ORDER BY u.sort_order` (api.ts), which is the one
   // reading the whole tracker is built around: silicon -> packaging -> substrate
@@ -144,6 +151,7 @@ export function Buckets({
       full
       staticCard
       actions={<ViewToggle value={viz} onChange={onViz} />}
+      footnote={consolidationNote()}
     >
       <div
         style={{

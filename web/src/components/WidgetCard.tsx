@@ -46,6 +46,16 @@ export interface WidgetCardProps {
    * row of stretched cards is the tidier default, and this opts one out of it.
    */
   fit?: boolean;
+  /**
+   * A caveat that belongs to the FIGURE, not to the page.
+   *
+   * Rendered as a hairline-separated last row of the card, below the body, so a
+   * qualification like "totals exclude X, counting both would double-count"
+   * cannot be scrolled away from the number it qualifies. Null renders nothing,
+   * which is what lets a caller pass a generated note straight through without
+   * a conditional at every call site.
+   */
+  footnote?: ReactNode;
   children: ReactNode;
 }
 
@@ -60,6 +70,7 @@ export function WidgetCard({
   collapsible,
   defaultOpen = false,
   fit,
+  footnote,
   children,
 }: WidgetCardProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -177,6 +188,21 @@ export function WidgetCard({
           }}
         >
           {children}
+        </div>
+      )}
+      {!folded && footnote && (
+        <div
+          style={{
+            flexShrink: 0,
+            padding: "6px 12px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--card-body-bg)",
+            fontSize: 10,
+            lineHeight: 1.4,
+            color: "var(--text-hint)",
+          }}
+        >
+          {footnote}
         </div>
       )}
     </div>

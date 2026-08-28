@@ -1,0 +1,82 @@
+# Relationships between companies in the tracked universe.
+#
+# WHY THIS FILE EXISTS
+#
+# The dashboard SUMS the 37 tracked companies. That is wrong whenever one of them
+# already contains another: Wistron's reported monthly revenue INCLUDES Wiwynn's,
+# because Wistron consolidates it. Adding both counted Wiwynn twice and overstated
+# the universe total by ~4.5% and the Rack / ODM stage by ~6.7%.
+#
+# THE TEST IS ACCOUNTING TREATMENT, NOT OWNERSHIP PERCENTAGE
+#
+# This is the trap, and it is worth stating loudly because the intuitive rule is
+# wrong. Two pairs in this universe have nearly identical stakes and OPPOSITE
+# answers:
+#
+#   TSMC (2330) holds ~35% of Global Unichip (3443) -> EQUITY METHOD
+#       GUC's revenue is NOT inside TSMC's reported revenue. NOT a double count.
+#
+#   Wistron (3231) holds ~35-40% of Wiwynn (6669) -> CONSOLIDATED
+#       Wistron retains control, so Wiwynn's revenue IS inside Wistron's.
+#       IS a double count.
+#
+# So a holding percentage proves nothing. Only the parent's consolidated financial
+# statements settle it: a name listed among "investments accounted for using the
+# equity method" is safe; a name listed as a consolidated subsidiary is not.
+#
+# WHAT AN ENTRY HERE DOES
+#
+# `consolidation` entries remove the CHILD from every AGGREGATE — the universe
+# revenue total and the per-stage aggregates. The child's own row is untouched:
+# its per-company series, its place in the Data tab and its own acceleration all
+# stay exactly as filed. Only sums change, because only sums double-count.
+#
+# ADDING A PAIR DELETES REVENUE FROM THE TOTAL. Getting this wrong in the "too
+# eager" direction is WORSE than the bug it fixes, so an entry needs evidence of
+# consolidation specifically, and `treatment: equity_method` entries are recorded
+# precisely so nobody has to re-litigate a pair that was already checked and cleared.
+
+# ---------------------------------------------------------------- consolidation --
+consolidation:
+  - parent: "3231"          # Wistron
+    child: "6669"           # Wiwynn
+    treatment: consolidated
+    stake: "~35-40%"
+    confidence: high
+    evidence: >-
+      Wistron's 2026-03 filed revenue of 333,043,315 (TWD thousands) is exactly the
+      NT$3,330.43億 reported in the press, in the same report that describes Wiwynn's
+      986.49億 as 「子公司緯穎」. Wistron's share disposals were filed as
+      「未導致緯創對緯穎喪失控制力」 - control retained, so Wiwynn stays inside the
+      consolidated statements despite the sub-50% stake.
+
+# Pairs CHECKED AND CLEARED. These are not double counts and must NOT be excluded
+# from aggregates. Recorded so the check is not repeated and so nobody "fixes" a
+# non-problem by pattern-matching on the ownership percentage.
+cleared:
+  - parent: "2330"          # TSMC
+    child: "3443"           # Global Unichip
+    treatment: equity_method
+    stake: "~35%"
+    confidence: high
+    evidence: >-
+      TSMC's consolidated financial statements list Global Unichip among investments
+      accounted for using the EQUITY METHOD (voting-rights proportion 0.35). TSMC held
+      52% at GUC's 2003 acquisition and fell below 50% after GUC's 2006 TWSE listing.
+      GUC's revenue is therefore NOT inside TSMC's reported revenue.
+
+# ------------------------------------------------------------------ other edges --
+#
+# Supplier and competitor edges, for the relationship view and the "a related
+# company moved sharply, this one may be worth checking" flag. These are a
+# RISK-FLAGGING aid, never a causal claim - two companies moving together may
+# share a customer, a cycle, or nothing at all.
+#
+# Deliberately empty until researched. An unverified edge here would generate
+# confident-looking alerts founded on a guess, which is worse than no alerts.
+
+# from supplies to  (from_ticker sells into to_ticker)
+supplies: []
+
+# a competes with b; direction is not meaningful, list each pair once
+competes: []

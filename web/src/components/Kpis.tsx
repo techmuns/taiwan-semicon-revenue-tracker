@@ -24,7 +24,12 @@
 import { WidgetCard } from "./WidgetCard";
 import { consolidatedNote } from "./AlertStrip";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
-import { forMonth, medianOf, sumRevenue, weightedYoY } from "../stats";
+import { forAggregate, forMonth, medianOf, sumRevenue, weightedYoY } from "../stats";
+// Aliased. `consolidatedNote` above is about the two names that file in a
+// FOREIGN CURRENCY on a consolidated basis; this one is about a name whose
+// revenue is inside another tracked company's. Two different senses of the
+// same English word, one line apart, is a rename waiting to be got wrong.
+import { consolidationNote as doubleCountNote } from "../generated/relationships";
 import { metricSpec } from "../scale";
 import type { AnalyticsRow, BucketCell, HeatmapMetric, Meta } from "../types";
 
@@ -93,12 +98,25 @@ export function Kpis({
   const universeN = meta?.universe.length ?? 0;
   const trackable = meta?.universe.filter((u) => u.status === "active").length ?? 0;
   const note = consolidatedNote(meta?.alerts);
+  const dedupe = doubleCountNote();
   const spec = metricSpec(metric);
   /** The stage cells are in the metric's own unit, which is not always ppt. */
   const stageValue = (v: number | null) => (spec.unit === "ppt" ? ppt(v) : pct(v));
 
-  const total = sumRevenue(monthRows);
-  const wYoY = weightedYoY(monthRows);
+  // SUMS ONLY. Wiwynn's revenue is already inside Wistron's reported figure, so
+  // adding both counted it twice - 4.55% too high on the universe total. The
+  // medians below deliberately keep every filer: a median counts each company
+  // once, so it is not the same arithmetic and not the same error, and dropping
+  // a real filer out of a median would be a fresh one.
+  const summable = forAggregate(monthRows);
+  const total = sumRevenue(summable);
+  const wYoY = weightedYoY(summable);
+  // The FILING count, which is not the summed count: a de-duplicated company
+  // still filed. Using total.n in the subtitle would have reported "35 of 36
+  // trackable filed" on a month where all 36 did, turning a correctness fix
+  // into a phantom coverage failure.
+  const filedN = monthRows.filter((r) => r.revenue_twd_thousands !== null).length;
+  const deduped = filedN - total.n;
   const t1 = monthRows.filter((r) => r.tier === 1);
   const t1Yoy = medianOf(t1, (r) => r.yoy_pct);
   const accel = medianOf(monthRows, (r) => r.yoy_acceleration_ppt);
@@ -115,7 +133,10 @@ export function Kpis({
     {
       label: "Universe revenue",
       value: revenue(total.value),
-      basis: `sum of ${total.n} filings${total.missing ? ` · ${total.missing} absent` : ""}`,
+      basis:
+        `sum of ${total.n} filings` +
+        (total.missing ? ` · ${total.missing} absent` : "") +
+        (deduped > 0 ? ` · ${deduped} inside another filer` : ""),
     },
     {
       label: "Universe YoY",
@@ -164,9 +185,9 @@ export function Kpis({
               // `trackable`/`universeN` come from the unfiltered /api/meta. Read
               // as one fraction that said "3 of 36 trackable filed" when 33 names
               // were merely filtered out, which reads as a filing failure.
-              ? `${monthLabel(latestMonth)} · ${total.n} filed in the current filter · ` +
+              ? `${monthLabel(latestMonth)} · ${filedN} filed in the current filter · ` +
                 `${trackable} trackable of ${universeN} in universe`
-              : `${monthLabel(latestMonth)} · ${total.n} of ${trackable} trackable filed · ${universeN} in universe`
+              : `${monthLabel(latestMonth)} · ${filedN} of ${trackable} trackable filed · ${universeN} in universe`
             : "no data loaded"
         }
         full
@@ -189,8 +210,9 @@ export function Kpis({
             consolidated in a foreign currency. That caveat used to be visible
             only if you opened those two companies - which is not where anyone
             would misread it. It belongs against the total. */}
-        {note && (
+        {[dedupe, note].filter(Boolean).map((line) => (
           <div
+            key={line as string}
             style={{
               padding: "6px 12px",
               borderTop: "1px solid var(--border)",
@@ -198,9 +220,9 @@ export function Kpis({
               color: "var(--text-hint)",
             }}
           >
-            {note}
+            {line}
           </div>
-        )}
+        ))}
       </WidgetCard>
     </div>
   );

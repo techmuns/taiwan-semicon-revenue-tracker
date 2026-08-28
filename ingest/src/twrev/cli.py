@@ -7,6 +7,7 @@
     python -m twrev.cli show     --ticker 2330
     python -m twrev.cli refresh  --db data/pipeline.sqlite
     python -m twrev.cli export   --db data/pipeline.sqlite --out web/public/data
+    python -m twrev.cli validate                                  (offline, config only)
 
 `--tickers` is a real filter here: per-company fetches are independent, so
 repairing one ticker-month costs exactly one request.
@@ -501,6 +502,76 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Check every hand-edited config file, offline, in under a second.
+
+    This is the command to run after editing `config/universe.yaml` - which is
+    where a company's stage and tier live, and which the monthly seed rewrites
+    wholesale into D1. An edit here is live on the dashboard after the next
+    refresh, with no code change and no migration, so the thing standing between
+    a typo and a wrong stage on the published site is this check.
+
+    It also checks `config/relationships.yaml` and asserts the TypeScript it
+    generates is not stale. That file removes revenue from a headline total, so
+    a stale generated copy would mean the number on the page and the number the
+    config describes have quietly diverged.
+    """
+    from . import relationships as rel_mod
+    from . import segments as seg_mod
+
+    problems: list[str] = []
+    universe = load_universe()
+    print(f"universe.yaml       : {len(universe)} companies, "
+          f"{len(universe.trackable_tickers)} trackable, "
+          f"{len(universe.buckets)} stages")
+
+    # Every stage named on a company must be one of the declared buckets, and
+    # every declared bucket should have at least one member - an empty stage
+    # renders as a blank heatmap row that no filter can ever populate.
+    empty = [b for b in universe.buckets if not any(c.bucket == b for c in universe)]
+    for b in empty:
+        problems.append(f"universe.yaml: stage {b!r} is declared but has no companies")
+
+    load_sources()
+    print("sources.yaml        : ok")
+
+    rel = rel_mod.load_relationships(universe=universe)
+    print(f"relationships.yaml  : {len(rel.consolidation)} consolidation, "
+          f"{len(rel.cleared)} cleared, {len(rel.edges)} edges")
+    for c in rel.consolidation:
+        print(f"  excluded from sums: {c.child} ({c.parent} consolidates it)")
+
+    segs = seg_mod.load_segments(universe=universe)
+    print(f"segments.yaml       : {len(segs.definitions)} segment(s), "
+          f"{segs.observation_count} observation(s)")
+    for seg in segs.definitions:
+        print(f"  {seg.key:<12} {len(seg.members)} member(s), "
+              f"{sum(1 for o in segs.observations if o.segment == seg.key)} observation(s)")
+
+    # The generated TypeScript is the only copy the browser and the Worker read,
+    # so a stale file means the page and the config disagree about a number.
+    if args.write:
+        for path in (rel_mod.write_generated(rel, universe)
+                     + seg_mod.write_generated(segs, universe)):
+            print(f"generated           : wrote {path.relative_to(repo_root())}")
+    else:
+        stale = rel_mod.check_generated(rel, universe) + seg_mod.check_generated(segs, universe)
+        for path in stale:
+            problems.append(
+                f"{path} is stale - re-run `python -m twrev.cli validate --write`"
+            )
+        if not stale:
+            print("generated           : current")
+
+    if problems:
+        print("\nFAILED:", file=sys.stderr)
+        for msg in problems:
+            print(f"  - {msg}", file=sys.stderr)
+        return 1
+    print("\nall config valid")
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     universe, sources = load_universe(), load_sources()
     company = universe[args.ticker]
@@ -613,6 +684,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--out", default=None,
                     help="output directory (default web/public/data)")
     sp.set_defaults(func=cmd_export)
+
+    sp = sub.add_parser(
+        "validate",
+        help="check the hand-edited config files and the TypeScript they generate",
+    )
+    sp.add_argument("--write", action="store_true",
+                    help="regenerate the TypeScript instead of asserting it is current")
+    sp.set_defaults(func=cmd_validate)
 
     sp = sub.add_parser("show", help="print one ticker's series from the cache")
     sp.add_argument("--ticker", required=True)

@@ -15,7 +15,34 @@
  *    TSMC.
  */
 
+import { EXCLUDED_FROM_AGGREGATES } from "./generated/relationships";
 import type { AnalyticsRow } from "./types";
+
+const EXCLUDED = new Set(EXCLUDED_FROM_AGGREGATES);
+
+/**
+ * Drop companies whose revenue is ALREADY INSIDE another tracked company's
+ * reported figure, before anything is summed across companies.
+ *
+ * Wistron consolidates Wiwynn, so both filing separately means Wiwynn's revenue
+ * appears twice in any naive sum of the universe - once standalone and once
+ * inside Wistron. Measured against the live data that overstated the universe
+ * total by 4.55% and the Rack / ODM stage by 6.70%.
+ *
+ * **Call this before a SUM, and only before a SUM.** A subsidiary's own filed
+ * revenue is perfectly real: its row, its series, its growth and its place in
+ * the movers list are all correct as filed, and it is only ADDING it to its
+ * parent's that double counts. Medians and per-company views deliberately do
+ * not use this - a median counts each company once, which is not the same
+ * arithmetic and not the same error.
+ *
+ * The excluded list is generated from config/relationships.yaml; see
+ * src/generated/relationships.ts.
+ */
+export function forAggregate(rows: readonly AnalyticsRow[]): AnalyticsRow[] {
+  if (EXCLUDED.size === 0) return [...rows];
+  return rows.filter((r) => !EXCLUDED.has(r.ticker));
+}
 
 export interface Agg {
   value: number | null;
@@ -188,4 +215,77 @@ export function rebase(values: (number | null)[]): {
   if (baseIdx < 0) return { indexed: values.map(() => null), baseIdx: null };
   const base = values[baseIdx] as number;
   return { indexed: values.map((v) => (v === null ? null : (100 * v) / base)), baseIdx };
+}
+
+/**
+ * Median absolute deviation - the spread measure that a single extreme member
+ * cannot move.
+ *
+ * A standard deviation over ten stages is dominated by whichever stage is
+ * furthest out, which is precisely the stage a "what stands out" panel is trying
+ * to detect: the outlier inflates the yardstick it is being measured against and
+ * hides itself. The MAD does not have that feedback.
+ */
+export function mad(values: number[]): number | null {
+  const med = median(values);
+  if (med === null) return null;
+  return median(values.map((v) => Math.abs(v - med)));
+}
+
+export interface Standout<T> {
+  item: T;
+  value: number;
+  /** (value - median) / (1.4826 * MAD). Null when the MAD is 0. */
+  score: number | null;
+}
+
+/**
+ * Rank items by how far each sits from the median of the others, in MAD units.
+ *
+ * READ THE LIMIT BEFORE READING THE NUMBER. This is a RANKING, not a
+ * significance test, and the difference is not pedantry:
+ *
+ *  - Across months, a per-series z-score is arithmetically incapable of
+ *    reaching 3 at n=7 - the maximum possible |z| for a sample of 7 is 2.268 -
+ *    so a "3-sigma alert" on this dataset can never fire, and a 2-sigma one
+ *    fires on the series maximum or minimum every single time, by construction.
+ *    Measured on the live store: 100% of |z| > 2 flags were the series max or
+ *    min, and lag-1 autocorrelation was -0.310, so there is no trend model
+ *    underneath to appeal to either.
+ *  - Cross-sectionally, across ~10 stages in one month, the comparison at least
+ *    has independent members - but ten is still far too few to quote a
+ *    false-positive rate for, and the stages are not independent draws: they
+ *    share customers, a cycle, and in places each other's revenue.
+ *
+ * So the output is ordered, labelled in MAD units, and never called
+ * significant. It answers "which stage is most unlike the others this month",
+ * which is a real and useful question, and refuses the one it cannot answer.
+ *
+ * The scale constant 1.4826 makes the MAD comparable to a standard deviation
+ * for normally-distributed data. It is a unit convention here, not a normality
+ * claim - nothing about these ten numbers is assumed normal.
+ */
+export function standouts<T>(
+  items: readonly T[],
+  pick: (item: T) => number | null,
+): { ranked: Standout<T>[]; median: number | null; mad: number | null; n: number } {
+  const pairs: { item: T; value: number }[] = [];
+  for (const item of items) {
+    const v = pick(item);
+    if (v !== null && !Number.isNaN(v)) pairs.push({ item, value: v });
+  }
+  const values = pairs.map((p) => p.value);
+  const med = median(values);
+  const spread = mad(values);
+  // A zero MAD means over half the members share one value. The ratio would be
+  // infinite for everyone else, which is not a ranking - it is a division by
+  // zero wearing a number's clothes.
+  const scale = spread === null || spread === 0 ? null : 1.4826 * spread;
+  const ranked = pairs
+    .map((p) => ({
+      ...p,
+      score: scale === null || med === null ? null : (p.value - med) / scale,
+    }))
+    .sort((a, b) => Math.abs(b.score ?? 0) - Math.abs(a.score ?? 0));
+  return { ranked, median: med, mad: spread, n: pairs.length };
 }

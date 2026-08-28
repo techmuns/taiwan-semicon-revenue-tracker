@@ -1,0 +1,87 @@
+# Named slices of the universe, and the one place segment-level figures may enter.
+#
+# ------------------------------------------------------------------ READ THIS --
+#
+# WHAT THE MONTHLY FILING ACTUALLY CONTAINS
+#
+# Taiwan's monthly disclosure (MOPS 每月營收) is ONE consolidated net revenue
+# figure per company, plus last month, the year-ago month, the two year-to-date
+# totals and a free-text 備註. That is the entire filing. There is no product
+# line in it, no end market, no geography and no segment.
+#
+# So "how much of TSMC's revenue was HPC in July" IS NOT IN THIS PIPELINE and
+# cannot be derived from it by any amount of arithmetic. It exists only in the
+# quarterly IFRS 8 operating-segment note and in investor decks - a different
+# source, a different cadence (quarterly, not monthly), a different lag, and for
+# several of these 37 names a single reported segment, i.e. no split at all.
+#
+# THEREFORE THIS FILE HAS TWO HALVES, AND THEY ARE NOT THE SAME KIND OF THING
+#
+#   `segments:`     A NAMED SET OF COMPANIES. Fully computable today from data
+#                   already in the store. Its monthly aggregate is the sum of
+#                   its members' TOTAL revenue - honest, useful, and NOT the
+#                   members' HPC revenue. Every surface that renders it must say
+#                   so, because "HPC segment: NT$520bn" read as HPC-only revenue
+#                   would be off by whatever share is not HPC, which for a name
+#                   like TSMC is most of it.
+#
+#   `observations:` HAND-ENTERED segment splits from a named source document.
+#                   Never scraped, never inferred, never interpolated between
+#                   quarters. Empty until someone reads a filing and types one
+#                   in with its URL. A row here is a quotation, not a datapoint
+#                   the pipeline produced.
+#
+# Nothing in this file changes any company's own reported revenue anywhere.
+
+version: 1
+
+# --------------------------------------------------------------------- sets --
+#
+# A pilot segment: pick members, run `python -m twrev.cli validate --write`,
+# and the dashboard has the slice. No migration, no schema change, no code.
+# The full walkthrough is in docs/SEGMENT_PILOT.md.
+
+segments:
+  - key: hpc
+    label: High-performance compute
+    # One line, shown under the figure. It has to carry the caveat, because the
+    # caveat is the difference between a true statement and a false one.
+    basis: >-
+      Total reported revenue of the companies below, not their HPC-only revenue.
+      Monthly filings carry no product split; membership is an editorial call
+      recorded in config/segments.yaml.
+    members:
+      # Chosen as the names whose monthly revenue is most directly geared to AI
+      # / datacenter compute build-out, ACROSS the chain rather than within one
+      # stage - which is the whole point of a segment as against a bucket. Seven
+      # of the ten stages are represented; no Legacy or Analog name is, because
+      # those two buckets exist in this universe as the control group.
+      - "2330"   # TSMC                  - AI Silicon
+      - "3443"   # Global Unichip        - AI Silicon
+      - "3661"   # Alchip                - AI Silicon
+      - "3711"   # ASE Technology        - Advanced Packaging / Test
+      - "3037"   # Unimicron             - Substrate / AI PCB / Materials
+      - "8046"   # Nan Ya PCB            - Substrate / AI PCB / Materials
+      - "6669"   # Wiwynn                - Rack / ODM   (see the note below)
+      - "3231"   # Wistron               - Rack / ODM
+      - "2382"   # Quanta                - Rack / ODM
+      - "2345"   # Accton                - Networking
+      - "3017"   # Asia Vital Components - Thermal
+      - "2308"   # Delta Electronics     - Power / Data Center Electrical
+    notes: >-
+      Wiwynn (6669) is inside Wistron (3231) - see config/relationships.yaml.
+      Both are listed because membership is a claim about which businesses belong
+      to the theme; the AGGREGATE de-duplicates them, exactly as the universe
+      total does, so listing both cannot inflate the figure.
+
+# ------------------------------------------------------------- observations --
+#
+# Segment-level figures transcribed from a source document. Required fields:
+#
+#   ticker, segment, period ("2026-Q1" or "2026-03"), share_pct OR
+#   revenue_twd_thousands, source (a URL or an exact document name), as_of.
+#
+# DELIBERATELY EMPTY. A plausible-looking number with no source is worse than a
+# blank, because the blank is honest about what the pipeline knows.
+
+observations: []
