@@ -3,3 +3,11 @@ beautifulsoup4>=4.12,<5
 lxml>=5.2
 PyYAML>=6.0,<7
 pytest>=8.2
+# Test-only, but not optional. tests/test_mops_company.py asserts that lxml,
+# html.parser and html5lib all extract the same figures from the same MOPS
+# bytes - the three disagree about a malformed 備註 row, and that test is what
+# keeps the note-extraction path parser-independent. Without html5lib installed
+# those two cases error instead of running, which is how CI found this: it
+# passed locally, where html5lib happened to be present, and failed on a clean
+# runner.
+html5lib>=1.1
