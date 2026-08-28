@@ -87,33 +87,56 @@ cleared:
   - parent: "2330"          # TSMC
     child: "5347"           # VIS
     treatment: equity_method
-    stake: "~19%, was ~27.1% before May 2026"
+    stake: "28% at FY2025, 27.6% at 2026-02-28, ~19% after the May 2026 sale"
     confidence: high
     evidence: >-
-      GUC's FY2025 consolidated statements, same Note 28 table, categorise
-      "Vanguard International Semiconductor Corporation (VIS) - An associate of
-      TSMC" - contrast the same table's "VisEra Technologies Co., Ltd. - A
-      subsidiary of TSMC". TSMC's annual reports have carried VIS as an
-      equity-method associate since the 2000s. In May 2026 TSMC sold up to 152.0m
-      VIS shares, cutting the stake from ~27.1% to ~19%; some Taiwanese press
-      described this as 不必再合併報表, which is imprecise - the change is a loss
-      of significant influence (equity method to FVOCI), not a deconsolidation,
-      because VIS was never consolidated. VIS files its own MOPS revenue.
+      TSMC FY2025 Form 20-F, Note 14 "Investments Accounted for Using Equity
+      Method - Associates consisted of the following", lists Vanguard
+      International Semiconductor at a carrying amount of NT$18,068.7m and "28% of
+      ownership and voting rights", beside SSMC 39%, Xintec 41% and GUC 35%. VIS's
+      own statements list TSMC in the related-party table as 具重大影響之投資者 - an
+      investor with significant influence, not a parent. TSMC ceased to have
+      representation on VIS's board in June 2024, and in May 2026 sold up to 152m
+      shares, taking the stake to ~19%. Some Taiwanese press described that sale as
+      不必再合併報表; that is imprecise - the change is equity method to fair value,
+      not a deconsolidation, because VIS was never consolidated.
 
   - parent: "2303"          # UMC
     child: "3037"           # Unimicron
     treatment: equity_method
-    stake: "~13.01%"
+    stake: "13.01%"
     confidence: high
     evidence: >-
-      UMC is Unimicron's largest single shareholder, and its December 2025 board
-      resolution to subscribe to Unimicron's cash capital increase describes
-      Unimicron as UMC's 關聯企業 (associate, i.e. equity method), with the
-      holding remaining at ~13.01% after the raise. The arithmetic settles it
-      independently: Unimicron's 2026-07 revenue of 16,253,637 is 68% of UMC's
-      total reported 23,844,045. If UMC consolidated Unimicron, UMC's entire
-      foundry business would have to be ~7.6bn a month, which it is not - UMC's
-      reported figure IS its foundry business.
+      UMC FY2025 Form 20-F, Note 7 "Investments Accounted for Under the Equity
+      Method", carries Unimicron Technology Corp. at NT$14,388,815 thousand and
+      13.01% ownership, with the note: "Beginning from June 2020, the Company
+      accounts for its investment in UNIMICRON as an associate given the fact that
+      UMC obtained the ability to exercise significant influence over UNIMICRON
+      through representation on its Board of Directors", and "Although the Company
+      is the largest shareholder of some associates ... the Company does not
+      control but has significant influence." Unimicron is absent from UMC's list
+      of consolidated subsidiaries. Some Chinese-language sources still call
+      Unimicron a UMC subsidiary because it was spun out of UMC in 1990; that is
+      history, not accounting. The arithmetic agrees independently: Unimicron's
+      2026-07 revenue of 16,253,637 is 68% of UMC's total 23,844,045, so
+      consolidation would leave UMC's entire foundry business at ~7.6bn a month.
+
+  - parent: "2303"          # UMC
+    child: "6147"           # Chipbond
+    treatment: fvoci
+    stake: "7.14% direct, ~8.95% including UMC's venture arm"
+    confidence: high
+    evidence: >-
+      UMC FY2025 Form 20-F, Note (3) "Financial Assets at Fair Value through Other
+      Comprehensive Income", lists Chipbond Technology Corporation at NT$2,865,530
+      thousand, with the note that these holdings are "held for medium to long-term
+      purposes and therefore are accounted for as fair value through other
+      comprehensive income". Chipbond is deliberately NOT in UMC's equity-method
+      table. It arose from a September 2021 share swap. Worth recording because UMC
+      has a BOARD SEAT at Chipbond and Chipbond's own statements list 聯華電子 as a
+      related party - the facts that most look like control here - and the
+      accounting is still FVOCI. The reverse leg of that swap left Chipbond holding
+      ~0.62% of UMC, which is passive under any reading.
 
   - parent: "3231"          # Wistron
     child: "3661"           # Alchip
@@ -131,16 +154,186 @@ cleared:
 
 # ------------------------------------------------------------------ other edges --
 #
-# Supplier and competitor edges, for the relationship view and the "a related
-# company moved sharply, this one may be worth checking" flag. These are a
-# RISK-FLAGGING aid, never a causal claim - two companies moving together may
-# share a customer, a cycle, or nothing at all.
+# Supplier links between tracked companies. A RISK-FLAGGING AID, never a causal
+# claim: two companies moving together may share a customer, a cycle, or nothing
+# at all, and nothing here is used in any arithmetic. No figure on the dashboard
+# changes because of an edge.
 #
-# Deliberately empty until researched. An unverified edge here would generate
-# confident-looking alerts founded on a guess, which is worse than no alerts.
+# `confidence` is load-bearing and is shown in the UI, because these are not all
+# the same kind of statement:
+#
+#   high    a source NAMES the buyer. Auras' own customer list names Quanta,
+#           Wistron and Inventec; ASE's 20-F names TSMC. You can check it.
+#   medium  INFERRED FROM STAGE STRUCTURE. The supplier's market position is
+#           documented and the buyer is one of the assemblers that stage sells
+#           into, but no disclosure pairs the two by name. Directionally sound,
+#           not itemised.
+#
+# COMPETITORS ARE DELIBERATELY NOT LISTED. Every competitor edge the research
+# returned was between two companies in the same `bucket` - Unimicron/Kinsus/Nan
+# Ya PCB, AVC/Auras/Sunonwealth/Jentech, UMC/VIS/PSMC. That is already in
+# config/universe.yaml and already on every screen. Restating it here would
+# create a second source of truth for the same fact, free to drift from the
+# first, in exchange for nothing.
 
-# from supplies to  (from_ticker sells into to_ticker)
-supplies: []
+# `from` sells into `to`. Direction matters and is the thing most easily got
+# backwards, so each entry's evidence has to make the direction of sale explicit.
+supplies:
+  - from: "3711"            # ASE Technology
+    to: "2330"              # TSMC
+    confidence: high
+    evidence: >-
+      ASE Technology Holding FY2025 Form 20-F: "Since 1997, we have maintained a
+      strategic alliance with TSMC, which designates us as their non-exclusive
+      preferred provider of packaging and testing services for semiconductors
+      manufactured by TSMC." TSMC's back-end packaging and test outsourcing ratio
+      is reported rising from 18% (2024) toward 32% (2026) on CoWoS overflow.
+      Note that much of the billing under that alliance goes to TSMC's customers
+      rather than to TSMC, so the revenue link is weaker than the operational one.
 
-# a competes with b; direction is not meaningful, list each pair once
+  - from: "3324"            # Auras
+    to: "2382"              # Quanta
+    confidence: high
+    evidence: >-
+      Auras' customer list, as carried in two independent analyst summaries, names
+      廣達 (Quanta) explicitly among the assembly ODMs it ships thermal modules and
+      liquid cold plates to.
+
+  - from: "3324"            # Auras
+    to: "3231"              # Wistron
+    confidence: high
+    evidence: >-
+      Same customer list, which names 緯創 (Wistron) explicitly among the downstream
+      assembly ODMs Auras supplies.
+
+  - from: "3324"            # Auras
+    to: "2356"              # Inventec
+    confidence: high
+    evidence: >-
+      Same customer list, which names 英業達 (Inventec) explicitly among the
+      downstream assembly ODMs Auras supplies.
+
+  - from: "3680"            # Gudeng
+    to: "2330"              # TSMC
+    confidence: high
+    evidence: >-
+      Gudeng makes EUV reticle pods (>80% global share) and FOUP wafer carriers
+      (~30%), and its published customer list is "涵蓋台積電、英特爾、三星". TSMC is the
+      only EUV user in Taiwan, and Gudeng is one of a small number of
+      ASML-certified pod suppliers.
+
+  - from: "1560"            # Kinik
+    to: "2330"              # TSMC
+    confidence: high
+    evidence: >-
+      Kinik is TSMC's principal CMP diamond-disc supplier - "目前為台積電3nm與2nm的
+      主力供應商" - reported at over 70% share at the 3nm node, having displaced the
+      US incumbent as the largest 3nm supplier.
+
+  - from: "5434"            # Topco Scientific
+    to: "2330"              # TSMC
+    confidence: high
+    evidence: >-
+      Topco is the Shin-Etsu-system distributor in Taiwan for photoresist, silicon
+      wafers, slurry, quartz and advanced-packaging materials, with over 50% of
+      the domestic photoresist market. Semiconductors are 84%+ of its revenue and
+      its stated customer list is "主要客戶包括台積電、聯電、力積電、美光".
+
+  # ------------------------------------------------------------------------
+  # Below here the supplier's position is documented but no disclosure names
+  # the specific buyer. The direction is not in doubt - power and thermal sell
+  # INTO rack assembly, never the other way - but the pairing is structural.
+
+  - from: "2308"            # Delta Electronics
+    to: "2317"              # Hon Hai
+    confidence: medium
+    evidence: >-
+      Delta is the leading AI-server power supplier, reported above 60% share of
+      AI power in 2026, shipping PSUs, power shelves and busbars into GB200/GB300
+      racks. Hon Hai is the largest rack integrator and therefore among the
+      buyers. Inferred from stage structure; not itemised in a disclosure.
+
+  - from: "2308"            # Delta Electronics
+    to: "2382"              # Quanta
+    confidence: medium
+    evidence: >-
+      Same Delta position. Quanta shipped roughly 6,100 GB200/GB300 racks in 2025,
+      which consume merchant power shelves and 54V/800V PSUs. Inferred from stage
+      structure; not itemised in a disclosure.
+
+  - from: "2308"            # Delta Electronics
+    to: "3231"              # Wistron
+    confidence: medium
+    evidence: >-
+      Same Delta position; Delta is named alongside 廣達/緯創/緯穎 in AI-rack supply
+      chain reporting. Inferred from stage structure; not itemised in a disclosure.
+
+  - from: "2308"            # Delta Electronics
+    to: "6669"              # Wiwynn
+    confidence: medium
+    evidence: >-
+      Same Delta position; the same reporting groups 廣達、緯創、緯穎 as the assemblers
+      consuming Delta and Lite-On power. Inferred from stage structure; not
+      itemised in a disclosure.
+
+  - from: "2301"            # Lite-On
+    to: "2317"              # Hon Hai
+    confidence: medium
+    evidence: >-
+      Lite-On holds roughly 20-30% of the AI-server power-supply market and is the
+      largest BBU module supplier, with 8.5kW PSUs, BBUs and 110kW power shelves in
+      mass production for GB200/GB300 builds. It states it ships both to CSPs
+      directly and to its main customers, so the ODM leg is partly structural.
+      Inferred from stage structure; not itemised in a disclosure.
+
+  - from: "2301"            # Lite-On
+    to: "2382"              # Quanta
+    confidence: medium
+    evidence: >-
+      Same Lite-On position into Quanta's rack assembly. Inferred from stage
+      structure; not itemised in a disclosure.
+
+  - from: "2301"            # Lite-On
+    to: "6669"              # Wiwynn
+    confidence: medium
+    evidence: >-
+      Same Lite-On position into Wiwynn's CSP rack builds. Inferred from stage
+      structure; not itemised in a disclosure.
+
+  - from: "3017"            # Asia Vital Components
+    to: "2317"              # Hon Hai
+    confidence: medium
+    evidence: >-
+      AVC is the leading liquid cold-plate maker, reported near 50% share on
+      GB300 and NVIDIA GB200/GB300 certified, with server and chassis at 66% of
+      1H25 revenue. Hon Hai is the largest rack integrator and a buyer of
+      third-party cooling modules and chassis. Inferred from stage structure; not
+      itemised in a disclosure.
+
+  - from: "3017"            # Asia Vital Components
+    to: "2382"              # Quanta
+    confidence: medium
+    evidence: >-
+      Same AVC position; Quanta is one of the four AI-server rack ODMs that buy
+      those modules and chassis. Inferred from stage structure; not itemised in a
+      disclosure.
+
+  - from: "3017"            # Asia Vital Components
+    to: "3231"              # Wistron
+    confidence: medium
+    evidence: >-
+      Same AVC position into Wistron's AI rack assembly. Inferred from stage
+      structure; not itemised in a disclosure.
+
+  - from: "3017"            # Asia Vital Components
+    to: "6669"              # Wiwynn
+    confidence: medium
+    evidence: >-
+      Same AVC position into Wiwynn's CSP racks. The research pass that produced
+      this one stated plainly that it is "not itemised by name in a company
+      disclosure - inferred from AI-rack supply-chain structure", which is why it
+      is medium and why that sentence is repeated here rather than dropped.
+
+# Competitors are not listed; see the note above. `bucket` in config/universe.yaml
+# already IS the competitor set, and a second copy of it could only drift.
 competes: []

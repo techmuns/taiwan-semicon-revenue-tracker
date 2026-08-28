@@ -410,9 +410,38 @@ A seed referencing a column D1 did not have yet would abort the whole month's
 revenue update, turning a cosmetic ordering problem into a missed filing month.
 A build-time constant compiled into both bundles cannot fail that way.
 
-The supplier/competitor edges in the same file are **empty on purpose**. They
-would drive "a related company moved sharply, check this one" flags, and an edge
-asserted from memory produces confident-looking alerts founded on a guess.
+### Supply links
+
+The same file's `supplies` list carries 18 links between tracked companies,
+rendered on the Insights tab. **No number on the dashboard is computed from an
+edge** - not a total, not a growth rate, not a ranking. A test asserts that the
+exclusion set is a function of `consolidation` alone, so naming a company in an
+edge can never remove it from a sum.
+
+`confidence` is load-bearing and is rendered on every row, because the rows are
+not the same kind of claim:
+
+- **high - "named in a source".** A document names the buyer: Auras' customer
+  list names Quanta, Wistron and Inventec; ASE's 20-F names TSMC; Gudeng's,
+  Kinik's and Topco's published customer lists name TSMC.
+- **medium - "inferred from stage".** The supplier's market position is
+  documented and the buyer is one of the assemblers that stage sells into, but
+  no disclosure pairs the two by name. All eleven of these are power or thermal
+  selling into rack assembly, where the direction is not in doubt and only the
+  specific pairing is structural.
+
+`competes` is **empty on purpose**, and that is not an omission. Every
+competitor pair the research returned was two companies in the *same bucket* -
+Unimicron/Kinsus/Nan Ya PCB, AVC/Auras/Sunonwealth/Jentech, UMC/VIS/PSMC. That
+is already in `config/universe.yaml` and already on every screen; a second copy
+of it could only drift from the first.
+
+**On the "risk flag" these links were meant to power:** they are ranked by the
+*gap* between the two ends' acceleration, not marked with a badge. On the month
+this shipped, 12 of 18 pairs moved in opposite directions - a flag firing on two
+thirds of the rows is not a flag, it is the weather. The size of the gap is a
+continuous quantity a reader can judge, and the footnote states the base rate so
+nobody reads twelve alerts where there are none.
 
 ---
 

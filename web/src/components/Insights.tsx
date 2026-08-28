@@ -34,7 +34,12 @@
  *   Segment pilot    a named slice of the universe from config/segments.yaml.
  *                    Its figure is the members' TOTAL revenue, not their revenue
  *                    in that segment; `basis` says so and is always rendered.
- *   Relationships    the verified links between tracked companies. One today.
+ *   Relationships    the one consolidation pair, and the holdings checked and
+ *                    cleared - shown together because the intuitive "big stake
+ *                    means consolidated" rule is wrong and the counter-examples
+ *                    belong next to the case where it happens to hold.
+ *   Supply links     who sells into whom, and how far apart the two ends moved
+ *                    this month. A prompt to go and look, never a finding.
  */
 
 import { WidgetCard } from "./WidgetCard";
@@ -42,7 +47,12 @@ import { EmptyState } from "./states";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
 import { forAggregate, forMonth, standouts, sumRevenue, weightedYoY } from "../stats";
 import { cellStyle, metricSpec } from "../scale";
-import { CLEARED, CONSOLIDATION, consolidationNote } from "../generated/relationships";
+import {
+  CLEARED,
+  CONSOLIDATION,
+  SUPPLIES,
+  consolidationNote,
+} from "../generated/relationships";
 import { SEGMENTS } from "../generated/segments";
 import type { AnalyticsRow, BucketCell, HeatmapMetric } from "../types";
 
@@ -542,14 +552,187 @@ function Relationships() {
               borderTop: "1px solid var(--border)",
             }}
           >
-            Supplier and competitor links are not shown: none has been verified against a
-            filing yet. They would drive “a related company moved sharply, check this one”
-            flags, and an unverified edge produces a confident-looking alert founded on a
-            guess. The two lists are in <code>config/relationships.yaml</code>, empty, with
-            the fields an entry must carry.
+            Competitors are not listed separately: every competitor pair is two companies
+            in the same stage, which <code>config/universe.yaml</code> already records and
+            every screen already shows. A second copy of that fact could only drift from
+            the first. Supplier links are in the next card.
           </div>
         </>
       )}
+    </WidgetCard>
+  );
+}
+
+/**
+ * Who sells into whom, and whether the two ends moved together this month.
+ *
+ * THIS IS A PROMPT, NOT A FINDING. A supplier accelerating while its customer
+ * decelerates is worth a look; it is not evidence of anything. Two linked
+ * companies may diverge because of inventory, mix, a third customer, or a
+ * timing difference in when each recognises revenue - and two companies that
+ * move together may share a cycle rather than a relationship. Nothing on this
+ * dashboard is computed from an edge; no total, no growth rate, no ranking.
+ *
+ * `confidence` is rendered on every row because the rows are not the same kind
+ * of claim. `named` means a source names the buyer - Auras' own customer list,
+ * ASE's 20-F. `stage` means the supplier's position is documented and the buyer
+ * is one of the assemblers that stage sells into, but no disclosure pairs the
+ * two. Hiding that distinction behind one word would make the weaker rows read
+ * as strong as the stronger ones.
+ */
+function SupplyLinks({
+  rows,
+  latestMonth,
+  onSelect,
+}: {
+  rows: AnalyticsRow[];
+  latestMonth: string | null;
+  onSelect: (ticker: string) => void;
+}) {
+  const byTicker = new Map(forMonth(rows, latestMonth).map((r) => [r.ticker, r]));
+  const links = SUPPLIES.map((e) => {
+    const from = byTicker.get(e.from)?.yoy_acceleration_ppt ?? null;
+    const to = byTicker.get(e.to)?.yoy_acceleration_ppt ?? null;
+    // "Diverging" needs BOTH ends present and both meaningfully outside the
+    // neutral band, or a company that simply has not filed reads as a signal.
+    // 2 ppt is the same neutral window the heatmap's band 0 uses.
+    const diverging =
+      from !== null && to !== null && Math.abs(from) >= 2 && Math.abs(to) >= 2 &&
+      Math.sign(from) !== Math.sign(to);
+    // The GAP, not a badge. On the month this was built, 12 of 18 pairs moved in
+    // opposite directions - a flag that fires on two thirds of the rows is not a
+    // flag, it is the weather. The size of the gap is a continuous quantity the
+    // reader can judge for themselves, and it is what ranks the list.
+    const gap = from !== null && to !== null ? Math.abs(from - to) : null;
+    return { ...e, fromAccel: from, toAccel: to, diverging, gap };
+  }).sort((a, b) => (b.gap ?? -1) - (a.gap ?? -1));
+
+  const flagged = links.filter((l) => l.diverging).length;
+  const measurable = links.filter((l) => l.gap !== null).length;
+
+  return (
+    <WidgetCard
+      title="Supply links"
+      subtitle={
+        `${SUPPLIES.length} links between tracked companies` +
+        (latestMonth ? ` · both ends' acceleration in ${monthLabel(latestMonth)}` : "")
+      }
+      full
+      staticCard
+      footnote={
+        `A PROMPT, NOT A FINDING. ${flagged} of ${measurable} linked pairs moved in ` +
+        `OPPOSITE directions this month, so divergence is the normal state here rather ` +
+        `than an exception — read the SIZE of the gap, not its sign. A gap can open for ` +
+        `inventory, mix, a third customer or a timing difference in revenue recognition, ` +
+        `and two companies that move together may simply share a cycle. No number ` +
+        `anywhere on this dashboard is computed from these links.`
+      }
+    >
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--border)" }}>
+              {["Supplier", "sells into", "Basis", "Supplier accel", "Customer accel", "Gap"].map(
+                (h, i) => (
+                  <th
+                    key={h || i}
+                    className="eyebrow"
+                    style={{
+                      padding: "6px 8px",
+                      textAlign: i >= 3 ? "right" : "left",
+                      color: "var(--text-hint)",
+                      fontWeight: 500,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {links.map((l) => (
+              <tr
+                key={`${l.from}-${l.to}`}
+                style={{ borderBottom: "1px solid var(--border)" }}
+                title={l.evidence}
+              >
+                <td
+                  onClick={() => onSelect(l.from)}
+                  style={{ padding: "4px 8px 4px 14px", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  {l.fromName}
+                  <span style={{ color: "var(--text-hint)" }}> {l.from}</span>
+                </td>
+                <td
+                  onClick={() => onSelect(l.to)}
+                  style={{ padding: "4px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  {l.toName}
+                  <span style={{ color: "var(--text-hint)" }}> {l.to}</span>
+                </td>
+                <td
+                  style={{ padding: "4px 8px", fontSize: 10.5, color: "var(--text-hint)" }}
+                  title={
+                    l.confidence === "high"
+                      ? "A source names the buyer"
+                      : "Inferred from stage structure; no disclosure pairs the two by name"
+                  }
+                >
+                  {l.confidence === "high" ? "named in a source" : "inferred from stage"}
+                </td>
+                <td
+                  className="tnum"
+                  style={{
+                    ...cellStyle(l.fromAccel, "yoy_acceleration_ppt"),
+                    padding: "4px 8px",
+                    textAlign: "right",
+                    whiteSpace: "nowrap",
+                    width: 92,
+                  }}
+                >
+                  {ppt(l.fromAccel)}
+                </td>
+                <td
+                  className="tnum"
+                  style={{
+                    ...cellStyle(l.toAccel, "yoy_acceleration_ppt"),
+                    padding: "4px 8px",
+                    textAlign: "right",
+                    whiteSpace: "nowrap",
+                    width: 92,
+                  }}
+                >
+                  {ppt(l.toAccel)}
+                </td>
+                <td
+                  className="tnum"
+                  style={{
+                    padding: "4px 14px 4px 8px",
+                    textAlign: "right",
+                    fontSize: 11,
+                    width: 96,
+                    whiteSpace: "nowrap",
+                    // Weight is the only emphasis. A colour here would compete
+                    // with the two acceleration cells, which are already the
+                    // divergent-scale hues this gap is derived from.
+                    fontWeight: l.diverging ? 600 : 400,
+                    color: l.diverging ? "var(--text-primary)" : "var(--text-hint)",
+                  }}
+                  title={
+                    l.diverging
+                      ? "The two ends moved in opposite directions"
+                      : "The two ends moved the same way"
+                  }
+                >
+                  {l.gap === null ? NA : `${l.gap.toFixed(1)} ppt`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </WidgetCard>
   );
 }
@@ -582,6 +765,7 @@ export function Insights({
       />
       <SegmentPilot rows={rows} latestMonth={latestMonth} onSelect={onSelect} />
       <Relationships />
+      <SupplyLinks rows={rows} latestMonth={latestMonth} onSelect={onSelect} />
     </>
   );
 }

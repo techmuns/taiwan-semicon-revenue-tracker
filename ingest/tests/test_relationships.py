@@ -185,6 +185,89 @@ def test_empty_file_is_valid_and_excludes_nothing(tmp_path, universe):
 # ----------------------------------------------------------------- generation --
 
 
+def test_edges_are_within_the_universe_and_directional(universe):
+    """An edge to an untracked company cannot be rendered against a filing, and a
+    self-edge is meaningless. Direction matters: `supplies` is from -> to."""
+    r = rel.load_relationships(universe=universe)
+    known = set(universe.tickers)
+    for e in r.edges:
+        assert e.from_ticker in known and e.to_ticker in known
+        assert e.from_ticker != e.to_ticker
+        assert e.kind in ("supplies", "competes")
+        assert e.confidence in ("high", "medium", "low")
+        assert e.evidence
+
+
+def test_no_edge_is_asserted_twice_in_the_same_direction(universe):
+    """A duplicate would render as two rows saying the same thing, and would
+    double whatever weight a future consumer gave the link."""
+    r = rel.load_relationships(universe=universe)
+    seen = [(e.kind, e.from_ticker, e.to_ticker) for e in r.edges]
+    assert len(seen) == len(set(seen))
+
+
+def test_no_edge_can_change_a_number(universe):
+    """The invariant the whole edge feature rests on. Edges are a prompt to go
+    and look; if one ever reached `excluded_from_aggregates` it would silently
+    delete a company from the universe total."""
+    r = rel.load_relationships(universe=universe)
+    endpoints = {t for e in r.edges for t in (e.from_ticker, e.to_ticker)}
+    assert endpoints, "expected at least one edge, or this test proves nothing"
+    # The exclusion set is a function of `consolidation` ALONE. Edges name plenty
+    # of companies - Wiwynn among them - and naming one must never exclude it.
+    assert set(r.excluded_from_aggregates) == {c.child for c in r.consolidation}
+
+
+def test_competitor_edges_are_not_recorded(universe):
+    """Deliberate. Every competitor pair the research returned was two companies
+    in the SAME bucket, which config/universe.yaml already encodes and every
+    screen already shows. A second copy could only drift from the first."""
+    r = rel.load_relationships(universe=universe)
+    assert [e for e in r.edges if e.kind == "competes"] == []
+
+
+def test_self_edge_is_rejected(tmp_path, universe):
+    path = write(tmp_path, """
+        supplies:
+          - from: "2330"
+            to: "2330"
+            evidence: nonsense
+        """)
+    with pytest.raises(ConfigError, match="its own supplier"):
+        rel.load_relationships(path, universe)
+
+
+def test_duplicate_edge_is_rejected(tmp_path, universe):
+    """Two rows saying the same thing, and double the weight for any future
+    consumer that counts links."""
+    path = write(tmp_path, """
+        supplies:
+          - from: "2330"
+            to: "3443"
+            evidence: a
+          - from: "2330"
+            to: "3443"
+            evidence: b
+        """)
+    with pytest.raises(ConfigError, match="duplicate edge"):
+        rel.load_relationships(path, universe)
+
+
+def test_edge_confidence_must_be_a_known_level(tmp_path, universe):
+    """Confidence is rendered on every row and is what separates "a source names
+    the buyer" from "inferred from stage structure". An unrecognised level would
+    render as neither."""
+    path = write(tmp_path, """
+        supplies:
+          - from: "2330"
+            to: "3443"
+            confidence: certain
+            evidence: a
+        """)
+    with pytest.raises(ConfigError, match="not high/medium/low"):
+        rel.load_relationships(path, universe)
+
+
 def test_render_is_deterministic(universe):
     r = rel.load_relationships(universe=universe)
     assert rel.render_ts(r, universe) == rel.render_ts(r, universe)

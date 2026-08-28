@@ -170,6 +170,14 @@ acceleration and place in the Data tab and the CSV are all exactly as filed,
 because a subsidiary's own revenue is perfectly real. It is only *adding* it to
 its parent's that double counts.
 
+`config/relationships.yaml` also carries 18 **supply links** between tracked
+companies, shown on the Insights tab and used for nothing else — no total, no
+growth rate and no ranking is computed from an edge, and a test asserts that.
+Each row shows whether a source *names* the buyer or the pairing is *inferred
+from stage structure*, because those are not the same claim. Competitors are
+deliberately not listed: every competitor pair is two companies in the same
+`bucket`, which `universe.yaml` already records and every screen already shows.
+
 The test is **accounting treatment, not ownership percentage**, and that is the
 trap. Two pairs in this universe have nearly identical stakes and opposite
 answers: TSMC holds ~35% of Global Unichip and equity-methods it (not a double

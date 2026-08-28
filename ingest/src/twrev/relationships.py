@@ -139,6 +139,13 @@ def load_relationships(
             for f in ("from", "to", "evidence"):
                 if not raw.get(f):
                     raise ConfigError(f"{where}: missing required field {f!r}")
+            if str(raw["from"]) == str(raw["to"]):
+                noun = "supplier" if kind == "supplies" else "competitor"
+                raise ConfigError(f"{where}: a company cannot be its own {noun}")
+            if str(raw.get("confidence", "low")) not in VALID_CONFIDENCE:
+                raise ConfigError(
+                    f"{where}: confidence {raw.get('confidence')!r} is not high/medium/low"
+                )
             edges.append(
                 Edge(
                     from_ticker=str(raw["from"]),
@@ -148,6 +155,11 @@ def load_relationships(
                     evidence=str(raw["evidence"]).strip(),
                 )
             )
+
+    seen_edges = [(e.kind, e.from_ticker, e.to_ticker) for e in edges]
+    if len(seen_edges) != len(set(seen_edges)):
+        dupes = sorted({e for e in seen_edges if seen_edges.count(e) > 1})
+        raise ConfigError(f"{path}: duplicate edge(s) {dupes}")
 
     # ------------------------------------------------------------ invariants --
     #
@@ -237,6 +249,13 @@ def load_relationships(
 BANNER = "// GENERATED FILE - do not edit. Source: config/relationships.yaml"
 
 
+def _ts(value: str) -> str:
+    """A TS string literal. Whitespace is collapsed - evidence arrives from YAML
+    block scalars, so it carries the source file's own line breaks."""
+    collapsed = " ".join(value.split())
+    return '"' + collapsed.replace("\\", "\\\\").replace('"', '\\"') + '"' 
+
+
 def render_ts(rel: Relationships, universe: Universe) -> str:
     """The TypeScript module both web/ and worker/ import."""
     name = {c.ticker: c.display_name for c in universe}
@@ -299,6 +318,41 @@ def render_ts(rel: Relationships, universe: Universe) -> str:
             f'parentName: "{name.get(c.parent, c.parent)}", '
             f'childName: "{name.get(c.child, c.child)}", '
             f'treatment: "{c.treatment}", stake: "{c.stake}" }},'
+        )
+    lines += [
+        "];",
+        "",
+        "/**",
+        " * Who sells into whom. A RISK-FLAGGING AID, NEVER A CAUSAL CLAIM - two",
+        " * companies moving together may share a customer, a cycle, or nothing at all.",
+        " * No figure on this dashboard is computed from an edge.",
+        " *",
+        " * `confidence` is not decoration and must be rendered. `high` means a source",
+        " * NAMES the buyer - a customer list, a 20-F. `medium` means the supplier's",
+        " * position is documented and the buyer is one of the assemblers that stage",
+        " * sells into, but no disclosure pairs the two by name.",
+        " */",
+        "export interface SupplyEdge {",
+        "  from: string;",
+        "  to: string;",
+        "  fromName: string;",
+        "  toName: string;",
+        "  confidence: string;",
+        "  evidence: string;",
+        "}",
+        "",
+        "export const SUPPLIES: readonly SupplyEdge[] = [",
+    ]
+    for e in sorted(
+        (e for e in rel.edges if e.kind == "supplies"),
+        key=lambda e: (0 if e.confidence == "high" else 1, name.get(e.from_ticker, ""),
+                       name.get(e.to_ticker, "")),
+    ):
+        lines.append(
+            f'  {{ from: "{e.from_ticker}", to: "{e.to_ticker}", '
+            f'fromName: "{name.get(e.from_ticker, e.from_ticker)}", '
+            f'toName: "{name.get(e.to_ticker, e.to_ticker)}", '
+            f'confidence: "{e.confidence}", evidence: {_ts(e.evidence)} }},'
         )
     lines += [
         "];",
