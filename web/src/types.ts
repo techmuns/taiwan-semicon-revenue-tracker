@@ -68,6 +68,11 @@ export interface Alerts {
     month: string | null;
     message: string;
   }[];
+  /**
+   * How many error/warn findings there ACTUALLY are. `severe_findings` is capped
+   * at 20; this is not. Render this as the count, never the array's length.
+   */
+  severe_total?: number;
   /** Filers whose revenue LEVELS are not comparable with the standalone filers. */
   consolidated: { ticker: string; display_name: string }[];
 }

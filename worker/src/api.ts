@@ -212,6 +212,17 @@ async function meta(env: Env) {
     alerts: {
       interior_gaps: gaps.results,
       severe_findings: severe.results,
+      // The LIST is capped at 20 so a bad month cannot ship a thousand-line
+      // strip; the COUNT must not be. The dashboard renders this number, and
+      // rendering the capped array's length said "20 open findings" when there
+      // were more - understating a data-quality problem, which is the one
+      // direction it must never be wrong in. `findings_by_code` is an uncapped
+      // GROUP BY over the same rows, so the true total costs no extra query.
+      severe_total: findings.results.reduce(
+        (n: number, r: any) =>
+          r.severity === "error" || r.severity === "warn" ? n + (r.n ?? 0) : n,
+        0,
+      ),
       consolidated: consolidated.results,
     },
     access: accessPosture(env),
@@ -305,6 +316,49 @@ function readFilters(url: URL): Filters {
 }
 
 /**
+ * The half of the filter contract `readFilters` cannot enforce on its own.
+ *
+ * `readFilters` rejects anything MALFORMED, and its docstring above states the
+ * rule: reject rather than silently discard, because a discarded value widens
+ * the answer instead of narrowing it. But two filters can be perfectly well
+ * formed and still match nothing real - `?buckets=Substrate` after that stage is
+ * renamed in universe.yaml, or `?tickers=9999`, which passes TICKER_RE and is
+ * not a company. Both returned 200 with a quietly smaller set, and
+ * `?buckets=AI Silicon,Nonsense` returned the three AI Silicon rows as though
+ * that were the whole answer.
+ *
+ * That matters here specifically because every view is shareable by URL: a link
+ * sent before a stage was renamed would arrive showing fewer companies with
+ * nothing to say it had. Now it 400s with the same shape a bad tier gets.
+ *
+ * One query, and only when such a filter is present - the default path pays
+ * nothing.
+ */
+async function assertFiltersMatchTheUniverse(env: Env, f: Filters): Promise<void> {
+  if (!f.buckets.length && !f.tickers.length) return;
+  const rows = await env.DB.prepare(`SELECT ticker, bucket FROM universe`).all<any>();
+  const tickers = new Set(rows.results.map((r) => r.ticker));
+  const buckets = new Set(rows.results.map((r) => r.bucket));
+
+  const unknownBucket = f.buckets.filter((b) => !buckets.has(b));
+  if (unknownBucket.length) {
+    throw new BadFilterError({
+      parameter: "buckets",
+      supplied: unknownBucket.join(","),
+      expected: [...buckets].join(" | "),
+    });
+  }
+  const unknownTicker = f.tickers.filter((t) => !tickers.has(t));
+  if (unknownTicker.length) {
+    throw new BadFilterError({
+      parameter: "tickers",
+      supplied: unknownTicker.join(","),
+      expected: "a ticker in this universe - see /api/meta",
+    });
+  }
+}
+
+/**
  * Shared WHERE builder. Returns SQL fragments plus the bindings, in order.
  *
  * `revenueCol` exists because the two views name the same figure differently:
@@ -358,6 +412,7 @@ const TWELVE_COLUMN_ORDER = "ORDER BY u.sort_order, a.ticker, a.month";
 
 async function analytics(env: Env, url: URL) {
   const f = readFilters(url);
+  await assertFiltersMatchTheUniverse(env, f);
   const { sql, binds } = whereFor(f, { prefix: "a" });
   // Ordering by month text is safe: 'YYYY-MM' sorts lexicographically.
   const rows = await env.DB.prepare(
@@ -388,6 +443,7 @@ async function analytics(env: Env, url: URL) {
  */
 async function heatmap(env: Env, url: URL) {
   const f = readFilters(url);
+  await assertFiltersMatchTheUniverse(env, f);
   const metric = url.searchParams.get("metric") ?? "yoy_acceleration_ppt";
   if (!HEATMAP_METRICS.has(metric)) {
     return {
@@ -806,6 +862,7 @@ async function quality(env: Env) {
 
 async function exportCsv(env: Env, url: URL): Promise<Response> {
   const f = readFilters(url);
+  await assertFiltersMatchTheUniverse(env, f);
   const { sql, binds } = whereFor(f, { prefix: "a" });
   const rows = await env.DB.prepare(
     `${TWELVE_COLUMN_SELECT} WHERE ${sql} ${TWELVE_COLUMN_ORDER}`,

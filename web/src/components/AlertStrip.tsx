@@ -62,6 +62,10 @@ function Strip({
 export function AlertStrip({ alerts }: { alerts: Alerts | undefined }) {
   const gaps = alerts?.interior_gaps ?? [];
   const severe = alerts?.severe_findings ?? [];
+  // The list is capped at 20 by the API; the count must be the real one. Falling
+  // back to the array's length keeps this correct against an older deploy that
+  // does not send the total yet - it just cannot then know it was truncated.
+  const severeTotal = alerts?.severe_total ?? severe.length;
   if (gaps.length === 0 && severe.length === 0) return null;
 
   return (
@@ -87,9 +91,14 @@ export function AlertStrip({ alerts }: { alerts: Alerts | undefined }) {
       {severe.length > 0 && (
         <Strip tone={severe.some((f) => f.severity === "error") ? "error" : "warn"}>
           <StatusDot level={severe.some((f) => f.severity === "error") ? "critical" : "warning"}>
-            {severe.length} open finding{severe.length === 1 ? "" : "s"}
+            {severeTotal} open finding{severeTotal === 1 ? "" : "s"}
           </StatusDot>
           <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+            {severeTotal > severe.length && (
+              <div style={{ color: "var(--text-hint)" }}>
+                showing the first {severe.length}
+              </div>
+            )}
             {severe.map((f, i) => (
               <div key={i} style={{ color: "var(--text-muted)" }}>
                 <code style={{ color: "var(--text-primary)" }}>{f.code}</code>
