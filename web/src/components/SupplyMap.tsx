@@ -49,6 +49,7 @@ import type { ReactNode } from "react";
 import { useWidth, Tooltip } from "./charts";
 import type { TipState } from "./charts";
 import { Legend } from "./Heatmap";
+import { EmptyState } from "./states";
 import { NA, ppt, revenue } from "../format";
 import { bandFor, cellStyle } from "../scale";
 import { CONSOLIDATION, SUPPLIES } from "../generated/relationships";
@@ -71,7 +72,20 @@ interface Node {
   bucket: string;
   accel: number | null;
   revenue: number | null;
-  filed: boolean;
+  /**
+   * Why this node has no acceleration to colour by. Three different facts that
+   * a single `filed` flag conflated, and the node captioned all of them "no
+   * filing" - which asserted an absence that had not happened:
+   *
+   *   "filter"  the company is outside the current stage/tier/ticker filter, so
+   *             there is no row for it here at all. It very probably filed.
+   *   "filing"  it is in the filter and genuinely did not file this month.
+   *   "prior"   it filed, but acceleration needs the previous month's YoY and
+   *             there is none - every company looks like this in Dec 2025, the
+   *             selectable shoulder month, where all 37 accelerations are null
+   *             and 36 companies filed.
+   */
+  absent: "filter" | "filing" | "prior" | null;
   x: number;
   y: number;
 }
@@ -135,20 +149,23 @@ function layout(
 
   for (const t of ordered) {
     const row = byTicker.get(t);
-    const bucket = row?.bucket ?? "";
+    const bucket = row?.bucket ?? "not in this filter";
     if (bucket !== current) {
       if (current !== null) y += STAGE_GAP;
       bands.push({ label: bucket, y });
       y += STAGE_LABEL_H;
       current = bucket;
     }
+    const filed = row !== undefined && row.revenue_twd_thousands !== null;
+    const accel = row?.yoy_acceleration_ppt ?? null;
     nodes.push({
       ticker: t,
       name: row?.company_name ?? t,
       bucket,
-      accel: row?.yoy_acceleration_ppt ?? null,
+      accel,
       revenue: row?.revenue_twd_thousands ?? null,
-      filed: (row?.revenue_twd_thousands ?? null) !== null,
+      absent:
+        row === undefined ? "filter" : !filed ? "filing" : accel === null ? "prior" : null,
       x,
       y,
     });
@@ -172,6 +189,14 @@ function NodeBox({
 }) {
   const style = cellStyle(node.accel, "yoy_acceleration_ppt");
   const missing = bandFor(node.accel, "yoy_acceleration_ppt") === null;
+  const why =
+    node.absent === "filter"
+      ? "not in this filter"
+      : node.absent === "filing"
+        ? "no filing"
+        : node.absent === "prior"
+          ? "no prior month"
+          : null;
   return (
     <g
       opacity={dim ? 0.22 : 1}
@@ -211,7 +236,7 @@ function NodeBox({
         fill={missing ? "var(--cell-missing-ink)" : style.color}
         opacity={0.85}
       >
-        {node.ticker} · {node.filed ? ppt(node.accel) : "no filing"}
+        {node.ticker} · {why ?? ppt(node.accel)}
       </text>
     </g>
   );
@@ -240,6 +265,18 @@ export function SupplyMap({
 
   const supplierIds = [...new Set(SUPPLIES.map((e) => e.from))];
   const buyerIds = [...new Set(SUPPLIES.map((e) => e.to))];
+  /**
+   * The layout's precondition, checked rather than assumed.
+   *
+   * Two columns only works while the graph is one hop deep - every company is a
+   * supplier or a buyer, never both. Add one edge from a company that already
+   * receives one (Wistron selling into Hon Hai would do it) and the same company
+   * appears in both columns: React would draw it twice, `pos` would keep only
+   * the second, and every edge touching it would silently point at one of the
+   * two boxes. A wrong picture drawn confidently is worse than no picture, so
+   * this stops instead and says what changed.
+   */
+  const inBoth = supplierIds.filter((t) => buyerIds.includes(t));
   const linked = new Set([...supplierIds, ...buyerIds]);
   const unlinked = universe.filter((c) => !linked.has(c.ticker));
 
@@ -281,6 +318,21 @@ export function SupplyMap({
   const dimNode = (t: string) =>
     hot !== null && hot !== t &&
     !SUPPLIES.some((e) => (e.from === hot && e.to === t) || (e.to === hot && e.from === t));
+
+  if (inBoth.length > 0) {
+    const names = inBoth.map((t) => byTicker.get(t)?.company_name ?? t).join(", ");
+    return (
+      <EmptyState
+        message="The supply graph is no longer one hop deep"
+        hint={
+          `${names} now both sells to and buys from other tracked companies, so a ` +
+          `two-column map would draw it twice and split its links between the copies. ` +
+          `The table below is unaffected; the map needs a layered layout before it can ` +
+          `show this honestly.`
+        }
+      />
+    );
+  }
 
   return (
     <>
@@ -433,8 +485,22 @@ export function SupplyMap({
                       {n.name} <span style={{ color: "var(--text-hint)" }}>{n.ticker}</span>
                     </div>
                     <div style={{ marginTop: 2 }}>{n.bucket}</div>
-                    <div>Revenue: {n.filed ? revenue(n.revenue) : NA}</div>
-                    <div>Acceleration: {n.filed ? ppt(n.accel) : "no filing this month"}</div>
+                    <div>
+                      Revenue:{" "}
+                      {n.absent === "filter"
+                        ? "not in the current filter"
+                        : n.absent === "filing"
+                          ? "did not file this month"
+                          : revenue(n.revenue)}
+                    </div>
+                    <div>
+                      Acceleration:{" "}
+                      {n.absent === "prior"
+                        ? "needs the prior month's YoY, which this month has none of"
+                        : n.absent
+                          ? NA
+                          : ppt(n.accel)}
+                    </div>
                     <div style={{ marginTop: 2, color: "var(--text-hint)" }}>
                       {out ? `sells into ${out} ` : ""}
                       {out && inn ? "· " : ""}
@@ -472,8 +538,7 @@ export function SupplyMap({
             {unlinked.length} of {universe.length} tracked companies have no recorded supply link
           </span>{" "}
           — no customer or supplier has been read out of a filing for them yet. That is a
-          gap in the research, not a claim that they sell to nobody. Some of them do appear
-          in the holdings above:{" "}
+          gap in the research, not a claim that they sell to nobody:{" "}
           {unlinked.map((c, i) => (
             <span key={c.ticker}>
               {i > 0 && " · "}

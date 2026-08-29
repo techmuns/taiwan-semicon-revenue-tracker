@@ -797,6 +797,8 @@ export function Insights({
   const month = (bucketCells ?? []).filter((c) => c.month === latestMonth && c.value !== null);
   const { ranked } = standouts(month, (c) => c.value);
   const standoutBucket = ranked[0]?.item.bucket ?? null;
+  const supplierCount = new Set(SUPPLIES.map((e) => e.from)).size;
+  const buyerCount = new Set(SUPPLIES.map((e) => e.to)).size;
 
   return (
     <>
@@ -822,12 +824,17 @@ export function Insights({
         full
         staticCard
         bodyStyle={{ overflow: "hidden" }}
+        // Counted, not typed. "eight suppliers into six buyers" sat hardcoded
+        // directly beneath a subtitle and an aria-label computing the same two
+        // quantities, so one new edge would have left the sentence under the
+        // chart contradicting the sentence above it.
         footnote={
-          `EVERY RECORDED LINK IS ONE HOP — eight suppliers into six buyers, and nothing ` +
-          `sells into a supplier — which is why this is two columns and not a ten-stage ` +
-          `cascade. Node size is deliberately NOT revenue: on an honest scale the small ` +
-          `names would vanish beside TSMC, and a thick link would read as a large flow, ` +
-          `which no filing states. A link is a prompt to look, never a cause.`
+          `EVERY RECORDED LINK IS ONE HOP — ${supplierCount} suppliers into ${buyerCount} ` +
+          `buyers, and nothing sells into a supplier — which is why this is two columns ` +
+          `and not a ten-stage cascade. Node size is deliberately NOT revenue: on an ` +
+          `honest scale the small names would vanish beside TSMC, and a thick link would ` +
+          `read as a large flow, which no filing states. A link is a prompt to look, ` +
+          `never a cause.`
         }
       >
         <SupplyMap
