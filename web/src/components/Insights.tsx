@@ -219,11 +219,32 @@ function InsideTheStage({
   // De-duplicated, because "the stage's revenue" is a sum and one member's
   // figure can be inside another's. The RANKING below is over the individual
   // filers and keeps everyone: each company's own revenue is its own.
-  const stageTotal = sumRevenue(forAggregate(monthRows));
+  const summable = forAggregate(monthRows);
+  const stageTotal = sumRevenue(summable);
   const ranked = [...monthRows].sort(
     (a, b) => (b.revenue_twd_thousands ?? 0) - (a.revenue_twd_thousands ?? 0),
   );
-  const biggest = ranked[0];
+
+  /**
+   * A share is only meaningful for a company that is IN the denominator.
+   *
+   * The stage total is de-duplicated and the list is not - deliberately, since a
+   * subsidiary's own revenue is real and belongs on screen. But dividing one by
+   * the other for every row makes the column sum past 100%: on Rack / ODM this
+   * month it reached 106.7%, with Wiwynn shown as a 6.7% slice of a total that
+   * excludes it precisely because those 6.7 points are already inside Wistron's
+   * 17.6%. So excluded rows get the containment label instead of a percentage,
+   * and the footnote describes the largest SUMMABLE filer, which is the largest
+   * company the denominator actually contains.
+   */
+  const insideOf = new Map(CONSOLIDATION.map((c) => [c.child, c.parentName]));
+  const biggest = [...summable].sort(
+    (a, b) => (b.revenue_twd_thousands ?? 0) - (a.revenue_twd_thousands ?? 0),
+  )[0];
+  const shareOf = (r: AnalyticsRow): number | null =>
+    stageTotal.value && !insideOf.has(r.ticker)
+      ? ((r.revenue_twd_thousands ?? 0) / stageTotal.value) * 100
+      : null;
 
   return (
     <WidgetCard
@@ -238,10 +259,14 @@ function InsideTheStage({
       staticCard
       footnote={
         biggest && stageTotal.value
-          ? `${biggest.company_name} is ` +
-            `${((biggest.revenue_twd_thousands ?? 0) / stageTotal.value * 100).toFixed(0)}% of ` +
-            `the stage's de-duplicated revenue this month, so the stage's move is largely its ` +
-            `move. Share is a level, not a driver: a stage can inflect on a small member.`
+          ? `${biggest.company_name} is ${(shareOf(biggest) ?? 0).toFixed(0)}% of the stage's ` +
+            `de-duplicated revenue this month, so the stage's move is largely its move. Share ` +
+            `is a level, not a driver: a stage can inflect on a small member.` +
+            (ranked.length > summable.length
+              ? ` Rows marked “inside” are already counted within another member and so have ` +
+                `no share of their own — their revenue is real, it is just not a separate ` +
+                `slice of this stage.`
+              : "")
           : null
       }
     >
@@ -270,6 +295,11 @@ function InsideTheStage({
                   </div>
                   <div style={{ fontSize: 10, color: "var(--text-hint)" }}>
                     {r.ticker} · T{r.tier}
+                    {insideOf.has(r.ticker)
+                      ? ` · inside ${insideOf.get(r.ticker)}`
+                      : shareOf(r) !== null
+                        ? ` · ${(shareOf(r) as number).toFixed(1)}% of the stage`
+                        : ""}
                   </div>
                 </td>
                 <td

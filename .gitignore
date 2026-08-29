@@ -41,3 +41,6 @@ Thumbs.db
 # which silently swallowed web/public/data - the exported JSON the dashboard
 # reads and the refresh commits. The leading slash is load-bearing.
 /data/
+
+# Scratch CSV dumps from verifying the export against the API.
+/exp.csv

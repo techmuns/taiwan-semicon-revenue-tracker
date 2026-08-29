@@ -153,7 +153,14 @@ export interface Filters {
 export interface BucketHeatmap {
   group: "bucket";
   metric: HeatmapMetric;
+  /**
+   * The aggregation the SERVER APPLIED, which is not always the one requested -
+   * cumulative YoY has no equal-weighted variant. Label figures from this, never
+   * from the local toggle state, or the caption and the maths can disagree.
+   */
   agg: "weighted" | "equal";
+  /** What was asked for. Differs from `agg` only when it could not be honoured. */
+  agg_requested?: "weighted" | "equal";
   filters: Filters;
   cells: BucketCell[];
 }

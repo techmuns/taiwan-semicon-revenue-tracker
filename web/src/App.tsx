@@ -380,9 +380,7 @@ function OverviewTab({
       <div style={GRID}>
         <WidgetCard
           title="Supply chain by stage"
-          subtitle={`${spec.label} in ${spec.unit} · ${
-            agg === "weighted" ? "revenue-weighted" : "equal-weighted, one company one vote"
-          }`}
+          subtitle={`${spec.label} in ${spec.unit} · ${aggLabel(heat.data ?? undefined, agg)}`}
           full
           staticCard
           bodyStyle={{ overflow: "hidden" }}
@@ -456,6 +454,22 @@ function OverviewTab({
       </div>
     </>
   );
+}
+
+/**
+ * The weighting caption, read off what the SERVER APPLIED rather than off the
+ * toggle. Cumulative YoY has no equal-weighted variant, so asking for Equal
+ * returns the revenue-weighted figure - and captioning that "equal-weighted, one
+ * company one vote" from the local toggle state told the reader the opposite of
+ * how the number was made, in all 70 cells. When the request could not be
+ * honoured the caption says so, so a toggle that appears to do nothing is
+ * explained rather than merely inert.
+ */
+function aggLabel(d: BucketHeatmap | undefined, requested: "weighted" | "equal"): string {
+  const applied = d?.agg ?? requested;
+  const base =
+    applied === "weighted" ? "revenue-weighted" : "equal-weighted, one company one vote";
+  return applied !== requested ? `${base} · this metric has no equal-weighted form` : base;
 }
 
 /**
@@ -589,10 +603,8 @@ function InsightsTab({
         }}
       >
         <div style={{ fontSize: 11, color: "var(--text-hint)", lineHeight: 1.45, maxWidth: 620 }}>
-          Ranked on <strong>{spec.label}</strong>, {agg === "weighted"
-            ? "revenue-weighted"
-            : "equal-weighted, one company one vote"}
-          . Changing the metric changes what “stands out” means, which is the point: a stage can
+          Ranked on <strong>{spec.label}</strong>, {aggLabel(heat.data ?? undefined, agg)}.
+          Changing the metric changes what “stands out” means, which is the point: a stage can
           lead on growth and trail on acceleration in the same month.
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

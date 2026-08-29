@@ -127,6 +127,35 @@ def test_openapi_prev_month_fallback(conn):
     assert cell(conn, "2449", "2026-02", "mom_pct") == pytest.approx(6.67)
 
 
+def test_mom_has_two_member_sets_and_they_can_differ(conn):
+    """The asymmetry the bucket heatmap's `members_mom_equal` exists to report.
+
+    `mom_pct` is non-null on either of two branches: our own preceding month, or
+    the source's 上月營收 when there is no preceding month. The REVENUE-WEIGHTED
+    MoM can only use the first, because the second supplies no denominator to
+    sum. So the equal-weighted mean covers a strictly larger set than the
+    weighted ratio, and the member count shown beside each figure has to be the
+    one that describes IT.
+
+    2449 is the case: an OpenAPI row with 上月營收 and no preceding month. It has
+    a mom_pct, so it is in the average - and it is absent from the weighted set.
+    Reporting one count for both said "3 companies" over a mean of four on the
+    live store, which is the normal state between the 11th and 14th refresh runs.
+    """
+    weighted, equal = conn.execute(
+        """SELECT
+             SUM(CASE WHEN revenue_month IS NOT NULL
+                       AND prev_month_idx = month_idx - 1 AND prev_revenue > 0
+                      THEN 1 ELSE 0 END) AS members_mom,
+             COUNT(mom_pct)              AS members_mom_equal
+           FROM analytics_base
+          WHERE bucket = 'Advanced Packaging / Test' AND month = '2026-02'"""
+    ).fetchone()
+    assert equal == 1, "2449's fallback MoM must be in the equal-weighted average"
+    assert weighted == 0, "and absent from the revenue-weighted ratio"
+    assert weighted != equal, "the two bases are genuinely different sets"
+
+
 def test_universe_x_months_grid(conn):
     """Gaps are rows with NULLs, not absences - the agreed 6286 treatment."""
     universe = load_universe()

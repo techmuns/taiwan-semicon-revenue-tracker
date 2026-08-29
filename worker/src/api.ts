@@ -496,6 +496,21 @@ async function heatmap(env: Env, url: URL) {
                             AND b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
                        THEN 1 ELSE 0 END) AS members_mom,
 
+              -- The EQUAL-weighted MoM averages b.mom_pct, and mom_pct is NOT the
+              -- same set as members_mom above. The view computes it from our own
+              -- preceding month when there is one and FALLS BACK to the source's
+              -- 上月營收 when there is not - a branch the OpenAPI feeds populate
+              -- and the per-company MOPS scrape does not. So a company that filed
+              -- this month but skipped last month has a mom_pct and is in the
+              -- average, while members_mom excludes it.
+              --
+              -- Reproduced on the live store: drop 4919's June row and give its
+              -- July row a 上月營收, and Analog Cycle's equal-weighted MoM is the
+              -- mean of FOUR companies while members_mom reports three. That is
+              -- the normal state between the 11th and 14th refresh passes, which
+              -- exist precisely to sweep up late filers.
+              COUNT(b.mom_pct) AS members_mom_equal,
+
               SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
                        THEN b.cum_revenue END)       AS cum_num,
               SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
@@ -528,7 +543,8 @@ async function heatmap(env: Env, url: URL) {
        WINDOW w AS (PARTITION BY p.bucket ORDER BY p.month_idx)
      )
      SELECT bucket, month, revenue,
-            members, members_yoy, members_mom, members_cum, prev_members_yoy,
+            members, members_yoy, members_mom, members_mom_equal, members_cum,
+            prev_members_yoy,
             yoy_weighted, mom_weighted, cum_yoy_weighted,
             ROUND(yoy_equal, 2) AS yoy_equal, ROUND(mom_equal, 2) AS mom_equal,
             -- Contiguity-gated exactly as the per-ticker view gates it: across a
@@ -549,9 +565,18 @@ async function heatmap(env: Env, url: URL) {
     .bind(...binds, ...excludeBinds, f.from)
     .all();
 
+  // The aggregation ACTUALLY APPLIED, which is not always the one requested:
+  // cumulative YoY has no equal-weighted variant (see the switch below). The
+  // response reports this rather than echoing the request, because the dashboard
+  // labels the figure from it - and a number computed one way under a caption
+  // saying the other is the exact failure this codebase exists to avoid.
+  // Selecting Cumulative YoY + Equal used to return the revenue-weighted value
+  // in all 70 cells under the caption "equal-weighted, one company one vote".
+  const applied: "weighted" | "equal" = metric === "cumulative_yoy_pct" ? "weighted" : agg;
+
   // Map the requested metric onto the column the aggregation produced, so the
   // client reads one `value` field regardless of which knobs were set.
-  const suffix = agg === "equal" ? "equal" : "weighted";
+  const suffix = applied === "equal" ? "equal" : "weighted";
   const pick = (r: any): number | null => {
     switch (metric) {
       case "yoy_acceleration_ppt":
@@ -568,13 +593,26 @@ async function heatmap(env: Env, url: URL) {
         return null;
     }
   };
+  // The basis has to describe the set THIS aggregation covered, not the set the
+  // other one would have. Only MoM's two sets differ: yoy_pct is non-null exactly
+  // when `revenue_month IS NOT NULL AND revenue_yoy_month > 0`, which is
+  // members_yoy's predicate verbatim, so AVG(yoy_pct) and the weighted YoY always
+  // cover the same members. mom_pct's extra fallback branch is the one asymmetry.
   const membersFor = (r: any): number =>
-    metric === "mom_pct" ? r.members_mom : metric === "cumulative_yoy_pct" ? r.members_cum : r.members_yoy;
+    metric === "mom_pct"
+      ? applied === "equal"
+        ? r.members_mom_equal
+        : r.members_mom
+      : metric === "cumulative_yoy_pct"
+        ? r.members_cum
+        : r.members_yoy;
 
   return {
     group,
     metric,
-    agg,
+    agg: applied,
+    /** What the caller asked for. Differs from `agg` only when it could not be honoured. */
+    agg_requested: agg,
     filters: f,
     cells: rows.results.map((r: any) => ({
       bucket: r.bucket,
