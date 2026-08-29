@@ -499,6 +499,33 @@ segment split without someone deliberately updating that test.
 
 ---
 
+## Known properties that are not bugs
+
+Two things an audit will flag every time. Both are accurate descriptions of the
+code; neither is reachable, and the reasons are worth keeping written down.
+
+**`authoritative_revenue` ranks purely on `source_id`.** So a higher-precedence
+row carrying a NULL `revenue_month` would mask a lower-precedence row that has
+the figure - reproducible in SQL by inserting both by hand. The ingest cannot
+produce that pair: `backfill.run` appends a row only `if outcome.row is not
+None`, and every failure path - fetch failure, parse failure, not-an-issuer -
+yields `None` and writes no row at all. So a NULL-revenue `mops_company` row
+does not exist; the live store has 288 raw rows and zero with a NULL revenue.
+If the ingest is ever changed to persist a placeholder row, add
+`CASE WHEN revenue_month IS NULL THEN 1 ELSE 0 END` ahead of the source rank -
+and note that is a view migration, applied to D1 by hand.
+
+**The source-precedence CASE is a hardcoded list.** It is, and migration 0002's
+own comment says it must never drift from `config/sources.yaml`. It is now
+CHECKED rather than fixed in SQL: `twrev validate` parses the CASE out of
+`0001_init.sql` and asserts it names exactly the YAML's sources in the same
+order, so a config edit that needs a matching SQL edit fails CI before either
+reaches production. Making the view read `source_feed` instead would need a
+migration, and a schema the tests have and D1 does not is a worse failure than
+the drift it would prevent.
+
+---
+
 ## CI
 
 `.github/workflows/ci.yml`, on every push and pull request. Python tests, then
@@ -635,6 +662,13 @@ misread.
   series max or min, and lag-1 autocorrelation was −0.310. Ten stages is also far
   too few to quote a false-positive rate for, and they are not independent draws.
   The panel says "most unlike the others" and never says "significant".
+- **Acceleration is the difference of the two DISPLAYED YoY columns**, not a
+  recomputation from the raw levels, and that is deliberate. A reader
+  subtracting the two YoY columns in the CSV gets exactly the
+  `yoy_acceleration_ppt` column. The two conventions differ by at most 0.01pp -
+  on the live store, 59 of 252 cells differ in the last decimal - which is
+  immaterial next to a table that does not add up. An audit pass read this as a
+  defect; it is not, and a test pins it.
 - **Aggregates are revenue-weighted from levels, never an average of
   percentages**, with numerator and denominator summed over the *identical*
   member set. Summing all revenue over one set and all prior-year revenue over

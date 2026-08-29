@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -532,8 +533,59 @@ def cmd_validate(args: argparse.Namespace) -> int:
     for b in empty:
         problems.append(f"universe.yaml: stage {b!r} is declared but has no companies")
 
-    load_sources()
-    print("sources.yaml        : ok")
+    sources = load_sources()
+    print(f"sources.yaml        : {sources.backfill.source_id} + "
+          f"{len(sources.feeds)} feed(s)")
+
+    # ------------------------------------------------------------------------
+    # The one thing migration 0002 says "must never drift":
+    #
+    #   "analytics_monthly's source-precedence CASE and this list have to agree,
+    #    or the view would prefer a row the cron considers a fallback."
+    #
+    # Nothing enforced it. The CASE in 0001_init.sql is a hardcoded four-source
+    # list ending in ELSE 9, so adding a feed to config/sources.yaml at position
+    # 1 gives it precedence 1 in `source_feed` - the refresh treats it as the
+    # highest-priority fallback and writes its rows - while the view ranks it
+    # BELOW every named source and silently prefers the older row. The two
+    # halves would disagree about which filing is authoritative, which is the
+    # one disagreement that changes published numbers.
+    #
+    # Checked here rather than fixed in SQL on purpose: making the view read
+    # `source_feed` would need a migration, and migrations are applied to D1 by
+    # hand while everything else is automated - so a schema the tests had and
+    # production did not is a worse failure than the drift. A config edit that
+    # needs a matching SQL edit should simply fail CI, loudly, before either.
+    expected = [sources.backfill.source_id] + [f.source_id for f in sources.feeds]
+    case_sql = (repo_root() / "worker" / "migrations" / "0001_init.sql").read_text(
+        encoding="utf-8"
+    )
+    start = case_sql.find("ORDER BY CASE r.source_id")
+    arms = (
+        re.findall(r"WHEN '([a-z0-9_]+)'\s+THEN\s+(\d+)",
+                   case_sql[start:case_sql.find("END", start)])
+        if start != -1
+        else []
+    )
+    if not arms:
+        problems.append(
+            "could not find the source-precedence CASE in worker/migrations/"
+            "0001_init.sql - it was restructured; re-check it against "
+            "config/sources.yaml by hand"
+        )
+    else:
+        ranked = [sid for sid, _ in sorted(arms, key=lambda a: int(a[1]))]
+        print(f"  precedence          : {' > '.join(ranked)}")
+        if ranked != expected:
+            problems.append(
+                "source precedence disagrees between config/sources.yaml and the "
+                "CASE in worker/migrations/0001_init.sql:\n"
+                f"      yaml : {' > '.join(expected)}\n"
+                f"      sql  : {' > '.join(ranked)}\n"
+                "    A source the YAML ranks first but the SQL does not name falls to "
+                "ELSE 9 and loses to every named source, so the refresh and the view "
+                "would disagree about which filing is authoritative."
+            )
 
     rel = rel_mod.load_relationships(universe=universe)
     print(f"relationships.yaml  : {len(rel.consolidation)} consolidation, "
