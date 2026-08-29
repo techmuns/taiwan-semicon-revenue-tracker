@@ -458,7 +458,51 @@ async function heatmap(env: Env, url: URL) {
   // counted in the numerator only. Hence a `members_*` count per ratio - and the
   // ratio is emitted only when the set is non-empty.
   const rows = await env.DB.prepare(
-    `WITH per_bucket AS (
+    `WITH scoped AS (
+       -- The filtered universe, materialised ONCE so the membership comparison
+       -- below can reuse it without binding the filter parameters a second time.
+       SELECT * FROM analytics_base b WHERE ${sql}${excludeSql}
+     ),
+     member AS (
+       -- Who is actually behind the weighted YoY in each bucket-month. Same
+       -- predicate as members_yoy, so this is that set enumerated rather than
+       -- merely counted.
+       SELECT bucket, month_idx, ticker FROM scoped
+        WHERE revenue_month IS NOT NULL AND revenue_yoy_month > 0
+     ),
+     churn AS (
+       /*
+        * Did the member SET change against the IMMEDIATELY PRECEDING month?
+        *
+        * This replaces comparing LAG(members_yoy) - the count - which was wrong
+        * twice. A 1-for-1 swap changes the set without changing its size: blank
+        * 8081's July row and add 6286's, and Analog Cycle goes from
+        * {4919,6138,6415,8081} to {4919,6138,6286,6415} with the count still 4,
+        * so the caveat never appeared over an acceleration differencing two
+        * different sets. And LAG walks to the previous PRESENT row, which is not
+        * the previous month when a whole stage files nothing - blank Networking's
+        * only member in June and July's flag was computed against MAY while the
+        * tooltip said "vs prior month".
+        *
+        * Joining on month_idx - 1 makes adjacency structural rather than a gate
+        * that can be forgotten, and comparing tickers makes it identity rather
+        * than size.
+        */
+       SELECT bucket, month_idx, SUM(chg) AS changed FROM (
+         SELECT m.bucket AS bucket, m.month_idx AS month_idx, 1 AS chg
+           FROM member m LEFT JOIN member p
+             ON p.bucket = m.bucket AND p.ticker = m.ticker
+            AND p.month_idx = m.month_idx - 1
+          WHERE p.ticker IS NULL
+         UNION ALL
+         SELECT p.bucket AS bucket, p.month_idx + 1 AS month_idx, 1 AS chg
+           FROM member p LEFT JOIN member m
+             ON m.bucket = p.bucket AND m.ticker = p.ticker
+            AND m.month_idx = p.month_idx + 1
+          WHERE m.ticker IS NULL
+       ) GROUP BY bucket, month_idx
+     ),
+     per_bucket AS (
        SELECT b.bucket, b.month, b.month_idx,
               SUM(CASE WHEN b.revenue_month IS NOT NULL THEN 1 ELSE 0 END) AS members,
               SUM(b.revenue_month) AS revenue,
@@ -520,13 +564,13 @@ async function heatmap(env: Env, url: URL) {
 
               AVG(b.yoy_pct) AS yoy_equal,
               AVG(b.mom_pct) AS mom_equal
-         FROM analytics_base b
-        WHERE ${sql}${excludeSql}
+         FROM scoped b
         GROUP BY b.bucket, b.month, b.month_idx
        HAVING members > 0
      ),
      calc AS (
        SELECT p.*,
+         COALESCE(ch.changed, 0) AS members_churned,
          CASE WHEN p.members_yoy > 0 AND p.yoy_den > 0
               THEN ROUND(100.0 * (p.yoy_num * 1.0 / p.yoy_den - 1.0), 2) END AS yoy_weighted,
          CASE WHEN p.members_mom > 0 AND p.mom_den > 0
@@ -534,17 +578,20 @@ async function heatmap(env: Env, url: URL) {
          CASE WHEN p.members_cum > 0 AND p.cum_den > 0
               THEN ROUND(100.0 * (p.cum_num * 1.0 / p.cum_den - 1.0), 2) END AS cum_yoy_weighted,
          LAG(p.month_idx)   OVER w AS prev_idx,
-         LAG(p.members_yoy) OVER w AS prev_members_yoy,
          LAG(CASE WHEN p.members_yoy > 0 AND p.yoy_den > 0
                   THEN ROUND(100.0 * (p.yoy_num * 1.0 / p.yoy_den - 1.0), 2) END) OVER w
            AS prev_yoy_weighted,
          LAG(ROUND(p.yoy_equal, 2)) OVER w AS prev_yoy_equal
        FROM per_bucket p
+       LEFT JOIN churn ch ON ch.bucket = p.bucket AND ch.month_idx = p.month_idx
        WINDOW w AS (PARTITION BY p.bucket ORDER BY p.month_idx)
      )
      SELECT bucket, month, revenue,
             members, members_yoy, members_mom, members_mom_equal, members_cum,
-            prev_members_yoy,
+            -- Gated on the same contiguity as the acceleration it caveats: with
+            -- no adjacent prior month there is no "vs prior month" to speak of,
+            -- and the acceleration is null there anyway.
+            CASE WHEN prev_idx = month_idx - 1 THEN members_churned END AS members_churned,
             yoy_weighted, mom_weighted, cum_yoy_weighted,
             ROUND(yoy_equal, 2) AS yoy_equal, ROUND(mom_equal, 2) AS mom_equal,
             -- Contiguity-gated exactly as the per-ticker view gates it: across a
@@ -624,9 +671,7 @@ async function heatmap(env: Env, url: URL) {
       // Surfaced so a composition change is visible next to the number it moved,
       // rather than quietly changing the denominator between two months.
       composition_changed:
-        metric === "yoy_acceleration_ppt" &&
-        r.prev_members_yoy != null &&
-        r.prev_members_yoy !== r.members_yoy,
+        metric === "yoy_acceleration_ppt" && r.members_churned != null && r.members_churned > 0,
       revenue: r.revenue,
     })),
   };
