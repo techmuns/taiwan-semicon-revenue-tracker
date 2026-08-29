@@ -62,13 +62,13 @@ export function useWidth<T extends HTMLElement>(): [RefObject<T | null>, number]
 
 // ----------------------------------------------------------------- tooltip --
 
-interface TipState {
+export interface TipState {
   x: number;
   y: number;
   content: ReactNode;
 }
 
-function Tooltip({ tip, width }: { tip: TipState; width: number }) {
+export function Tooltip({ tip, width }: { tip: TipState; width: number }) {
   // Flip to the left of the cursor near the right edge so the tip never clips.
   const flip = tip.x > width - 180;
   return (

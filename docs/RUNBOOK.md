@@ -436,6 +436,37 @@ Unimicron/Kinsus/Nan Ya PCB, AVC/Auras/Sunonwealth/Jentech, UMC/VIS/PSMC. That
 is already in `config/universe.yaml` and already on every screen; a second copy
 of it could only drift from the first.
 
+### The map, and why it is two columns
+
+The Insights tab draws the links as a node-link map beside the table, because
+the table cannot answer questions about *shape*: is this stage a source or a
+sink, does anything feed a supplier, how much of the universe is connected at
+all. Hovering a company isolates it and its counterparties.
+
+**Two columns, not a ten-stage cascade**, because one hop is all the data has:
+eight suppliers sell into six buyers and nothing sells into a supplier. The
+column ordering is a two-layer barycentre sweep rather than chain order —
+measured, ordering both columns by chain position gives **72 edge crossings**
+and the sweep gives **14**, because the left column (Thermal, Power, Packaging,
+Equipment) and the right (Rack, AI Silicon) run in opposite chain directions, so
+chain order guarantees a full crossing. Every stage is still one contiguous
+labelled group; the vertical axis was never a scale.
+
+**Node size is deliberately not revenue.** TSMC is ~400x Gudeng, so on an honest
+scale the small names vanish — and a thick link between two large nodes reads as
+a large *flow*, which no filing states. Fill is the same diverging acceleration
+scale the heatmaps use, each node prints its own value, and a company that did
+not file gets the same 45-degree hatch a missing heatmap cell gets.
+
+**A graph database was considered and rejected.** The graph is 37 nodes and 24
+edges, one hop deep, with exactly three 2-hop paths of which two are already
+direct edges. Traversal is what a graph database is for and there is nothing
+here to traverse. Neo4j would also add a second store of company identity free
+to drift from `universe.yaml`, a second credential in CI, and — on the free tier
+— an instance that pauses when idle, against a pipeline that writes three days a
+month. Revisit if the universe grows multi-tier supply chains or deep ownership
+trees; at one hop, an array filter beats a network round trip.
+
 **On the "risk flag" these links were meant to power:** they are ranked by the
 *gap* between the two ends' acceleration, not marked with a badge. On the month
 this shipped, 12 of 18 pairs moved in opposite directions - a flag firing on two

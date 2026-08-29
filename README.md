@@ -178,6 +178,11 @@ from stage structure*, because those are not the same claim. Competitors are
 deliberately not listed: every competitor pair is two companies in the same
 `bucket`, which `universe.yaml` already records and every screen already shows.
 
+Those links are also drawn as a **map** on the Insights tab — two columns,
+because every recorded link is one hop, ordered by a barycentre sweep that cuts
+edge crossings from 72 to 14. Hovering a company isolates it and its
+counterparties, which is the one question the table beside it cannot answer.
+
 The test is **accounting treatment, not ownership percentage**, and that is the
 trap. Two pairs in this universe have nearly identical stakes and opposite
 answers: TSMC holds ~35% of Global Unichip and equity-methods it (not a double

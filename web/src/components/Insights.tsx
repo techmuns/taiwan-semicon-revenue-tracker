@@ -44,6 +44,7 @@
 
 import { WidgetCard } from "./WidgetCard";
 import { EmptyState } from "./states";
+import { SupplyMap } from "./SupplyMap";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
 import { forAggregate, forMonth, standouts, sumRevenue, weightedYoY } from "../stats";
 import { cellStyle, metricSpec } from "../scale";
@@ -742,12 +743,18 @@ export function Insights({
   bucketCells,
   latestMonth,
   metric,
+  stageOrder,
+  universe,
   onSelect,
 }: {
   rows: AnalyticsRow[];
   bucketCells: BucketCell[] | null;
   latestMonth: string | null;
   metric: HeatmapMetric;
+  /** Stages in supply-chain order, so the map's columns read like the chain. */
+  stageOrder: string[];
+  /** Every tracked company - the map counts the ones with no link, honestly. */
+  universe: { ticker: string; name: string }[];
   onSelect: (ticker: string) => void;
 }) {
   const month = (bucketCells ?? []).filter((c) => c.month === latestMonth && c.value !== null);
@@ -765,6 +772,35 @@ export function Insights({
       />
       <SegmentPilot rows={rows} latestMonth={latestMonth} onSelect={onSelect} />
       <Relationships />
+      {/* The map answers shape, the table answers per-pair detail. Map first:
+          "is this stage a source or a sink" is the question you have before you
+          have one about a specific row. */}
+      <WidgetCard
+        title="Supply map"
+        subtitle={
+          `${SUPPLIES.length} recorded links · fill is ${
+            latestMonth ? monthLabel(latestMonth) : "the latest month"
+          }'s YoY acceleration · click a company to open it`
+        }
+        full
+        staticCard
+        bodyStyle={{ overflow: "hidden" }}
+        footnote={
+          `EVERY RECORDED LINK IS ONE HOP — eight suppliers into six buyers, and nothing ` +
+          `sells into a supplier — which is why this is two columns and not a ten-stage ` +
+          `cascade. Node size is deliberately NOT revenue: on an honest scale the small ` +
+          `names would vanish beside TSMC, and a thick link would read as a large flow, ` +
+          `which no filing states. A link is a prompt to look, never a cause.`
+        }
+      >
+        <SupplyMap
+          rows={rows}
+          latestMonth={latestMonth}
+          stageOrder={stageOrder}
+          universe={universe}
+          onSelect={onSelect}
+        />
+      </WidgetCard>
       <SupplyLinks rows={rows} latestMonth={latestMonth} onSelect={onSelect} />
     </>
   );
