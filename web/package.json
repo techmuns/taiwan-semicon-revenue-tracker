@@ -4,10 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/check-theme-parity.mjs && tsc --noEmit && vite build",
+    "build": "node scripts/check-theme-parity.mjs && node scripts/check-stats.mjs && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "check-theme": "node scripts/check-theme-parity.mjs"
+    "check-theme": "node scripts/check-theme-parity.mjs",
+    "check-stats": "node scripts/check-stats.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",
