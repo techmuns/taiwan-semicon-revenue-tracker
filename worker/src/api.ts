@@ -784,10 +784,14 @@ async function companyDetail(env: Env, ticker: string) {
  */
 async function quality(env: Env) {
   const [coverage, gaps, findings, log] = await env.DB.batch<any>([
-    // The coverage matrix, straight off the grid the view already builds.
+    // The coverage matrix, straight off the grid the view already builds. The
+    // join to `universe` is for active_from/active_to, which analytics_base does
+    // not expose and which decide whether a cell was ever OWED a filing.
     env.DB.prepare(
-      `SELECT ticker, display_name, bucket, tier, status, month, has_data, source_id
-         FROM analytics_base ORDER BY sort_order, ticker, month_idx`,
+      `SELECT b.ticker, b.display_name, b.bucket, b.tier, b.status, b.month,
+              b.has_data, b.source_id, u.active_from, u.active_to
+         FROM analytics_base b JOIN universe u USING (ticker)
+        ORDER BY b.sort_order, b.ticker, b.month_idx`,
     ),
     /*
      * Interior gaps: a month with no data that has data SOMEWHERE before it and
@@ -832,9 +836,33 @@ async function quality(env: Env) {
 
   const cells = coverage.results;
   const withData = cells.filter((c: any) => c.has_data === 1).length;
-  // 6286 has no filing obligation, so counting it as missing would permanently
-  // show 97.3% and train the reader to ignore the number.
-  const trackable = cells.filter((c: any) => c.status !== "merged");
+
+  /**
+   * Was this company OWED a filing in this month?
+   *
+   * The basis for the coverage percentage, so getting it wrong reports absences
+   * that were never due as failures - which is how a reader is trained to
+   * ignore the number. 6286 is the standing case: merged, no obligation, and
+   * counting it would peg coverage at 97.3% forever.
+   *
+   * `status !== 'merged'` was too narrow. The schema's CHECK also permits
+   * 'delisted' and 'suspended', and universe.yaml's own editing rule is "to
+   * retire a name, set `status` and `active_to`" - so a delisted company counted
+   * as trackable for every month in the window, including the ones after it
+   * stopped existing.
+   *
+   * The window decides it, not the label: a month inside [active_from,
+   * active_to] was owed a filing whatever the company's status is TODAY, which
+   * is the point - status is a fact about now and coverage is a time series.
+   * A non-active company with no recorded window cannot be placed, so it is
+   * treated as never owing one, exactly as `merged` was.
+   */
+  const obligated = (c: any): boolean => {
+    if (c.active_from && c.month < c.active_from) return false;
+    if (c.active_to && c.month > c.active_to) return false;
+    return c.status === "active" || Boolean(c.active_to) || Boolean(c.active_from);
+  };
+  const trackable = cells.filter(obligated);
   const trackableWithData = trackable.filter((c: any) => c.has_data === 1).length;
 
   return {
@@ -847,9 +875,18 @@ async function quality(env: Env) {
       trackable_pct: trackable.length
         ? round2((100 * trackableWithData) / trackable.length)
         : null,
+      // Every absence that was not a failure, whatever made it so - a merger, a
+      // delisting, or a month outside the company's active window. Listing only
+      // the merged ones left a delisted name's absences unexplained.
       known_absent: cells
-        .filter((c: any) => c.has_data === 0 && c.status === "merged")
-        .map((c: any) => ({ ticker: c.ticker, month: c.month, status: c.status })),
+        .filter((c: any) => c.has_data === 0 && !obligated(c))
+        .map((c: any) => ({
+          ticker: c.ticker,
+          month: c.month,
+          status: c.status,
+          active_from: c.active_from ?? null,
+          active_to: c.active_to ?? null,
+        })),
     },
     matrix: cells,
     interior_gaps: gaps.results,
