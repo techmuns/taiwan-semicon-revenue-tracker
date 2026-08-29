@@ -56,6 +56,14 @@ def build_meta(conn: sqlite3.Connection, universe: Universe, sources: Sources) -
         if c.bucket not in buckets:
             buckets.append(c.bucket)
 
+    # Read once: it is both a payload field and the source of `severe_total`.
+    findings_by_code = _rows(
+        conn,
+        "SELECT severity, code, COUNT(*) AS n FROM quality_findings"
+        " GROUP BY severity, code ORDER BY"
+        "   CASE severity WHEN 'error' THEN 1 WHEN 'warn' THEN 2 ELSE 3 END, code",
+    )
+
     return {
         "universe": _rows(
             conn,
@@ -87,12 +95,7 @@ def build_meta(conn: sqlite3.Connection, universe: Universe, sources: Sources) -
             "  FROM raw_revenue WHERE revenue_month IS NOT NULL"
             " GROUP BY month ORDER BY month_idx",
         ),
-        "findings_by_code": _rows(
-            conn,
-            "SELECT severity, code, COUNT(*) AS n FROM quality_findings"
-            " GROUP BY severity, code ORDER BY"
-            "   CASE severity WHEN 'error' THEN 1 WHEN 'warn' THEN 2 ELSE 3 END, code",
-        ),
+        "findings_by_code": findings_by_code,
         "alerts": {
             "interior_gaps": _rows(
                 conn,
@@ -113,6 +116,16 @@ def build_meta(conn: sqlite3.Connection, universe: Universe, sources: Sources) -
                 "  FROM quality_findings WHERE severity IN ('error', 'warn')"
                 " ORDER BY CASE severity WHEN 'error' THEN 1 ELSE 2 END,"
                 "          code, month, ticker LIMIT 20",
+            ),
+            # The LIST above is capped at 20 so a bad month cannot ship a
+            # thousand-line strip; the COUNT must not be, because the dashboard
+            # renders it. Rendering the capped list's length said "20 open
+            # findings" when there were more, which understates a data-quality
+            # problem - the one direction it must never be wrong in. Derived
+            # from the uncapped GROUP BY above, exactly as api.ts does it, so
+            # the two implementations cannot drift on this.
+            "severe_total": sum(
+                r["n"] for r in findings_by_code if r["severity"] in ("error", "warn")
             ),
             "consolidated": _rows(
                 conn,
