@@ -96,7 +96,27 @@ export function Kpis({
 }) {
   const monthRows = forMonth(rows, latestMonth);
   const universeN = meta?.universe.length ?? 0;
-  const trackable = meta?.universe.filter((u) => u.status === "active").length ?? 0;
+
+  /**
+   * Did this company owe a filing in the month on screen?
+   *
+   * The same rule the Worker's coverage basis uses, and it has to be the same
+   * one or the two disagree. `status === "active"` was too narrow in both
+   * directions: universe.yaml's own retirement instruction is to set `status`
+   * AND `active_to`, so a name delisted mid-window stopped counting as trackable
+   * even in the months it did file - which could print "36 of 35 trackable
+   * filed". The window decides it, because status is a fact about now and this
+   * is a time series.
+   */
+  const owedAFiling = (u: { status: string; active_from: string | null; active_to: string | null }) => {
+    if (!latestMonth) return u.status === "active";
+    if (u.active_from && latestMonth < u.active_from) return false;
+    if (u.active_to && latestMonth > u.active_to) return false;
+    return u.status === "active" || Boolean(u.active_to) || Boolean(u.active_from);
+  };
+  const obligated = (meta?.universe ?? []).filter(owedAFiling);
+  const trackable = obligated.length;
+  const obligatedTickers = new Set(obligated.map((u) => u.ticker));
   const note = consolidatedNote(meta?.alerts);
   const dedupe = doubleCountNote();
   const spec = metricSpec(metric);
@@ -117,6 +137,16 @@ export function Kpis({
   // into a phantom coverage failure.
   const filedN = monthRows.filter((r) => r.revenue_twd_thousands !== null).length;
   const deduped = filedN - total.n;
+  /**
+   * Absences that are actually absences. `total.missing` counts every null in
+   * the summed set, which includes the one universe member with no filing
+   * obligation - so the card printed "1 absent" directly under a subtitle
+   * reading "36 of 36 trackable filed". Both were on screen at once, saying
+   * opposite things.
+   */
+  const absent = summable.filter(
+    (r) => r.revenue_twd_thousands === null && obligatedTickers.has(r.ticker),
+  ).length;
   const t1 = monthRows.filter((r) => r.tier === 1);
   const t1Yoy = medianOf(t1, (r) => r.yoy_pct);
   const accel = medianOf(monthRows, (r) => r.yoy_acceleration_ppt);
@@ -129,13 +159,28 @@ export function Kpis({
   const leader = sorted[0];
   const laggard = sorted.length > 1 ? sorted[sorted.length - 1] : undefined;
 
+  /**
+   * The stage cells' basis.
+   *
+   * `members_with_revenue` is counted over the DE-DUPLICATED member set, so
+   * calling it "filed" was off by one on any stage holding a consolidated pair -
+   * Rack / ODM read "5 filed" in a month when all six of its companies did.
+   * And `composition_changed` was dropped entirely, so an acceleration computed
+   * across a changed member set carried a single-month count as its basis with
+   * no hint that the denominator had moved.
+   */
+  const stageBasis = (c: BucketCell) =>
+    `${stageValue(c.value)} · ${c.members_with_revenue} in the sum, ` +
+    `${c.members} with a comparable` +
+    (c.composition_changed ? " · membership changed" : "");
+
   const kpis: Kpi[] = [
     {
       label: "Universe revenue",
       value: revenue(total.value),
       basis:
         `sum of ${total.n} filings` +
-        (total.missing ? ` · ${total.missing} absent` : "") +
+        (absent ? ` · ${absent} absent` : "") +
         (deduped > 0 ? ` · ${deduped} inside another filer` : ""),
     },
     {
@@ -156,20 +201,21 @@ export function Kpis({
       basis: `median of ${accel.n} names · change in YoY rate`,
       ...tone(accel.value),
     },
+    // Named for the METRIC, not for growth. These cells rank whatever the
+    // heatmap is showing, and the default is acceleration - so "Slowest stage:
+    // AI Silicon" appeared over a stage growing +46.6% YoY, the third fastest
+    // of the ten, purely because its growth had decelerated hardest. "Highest"
+    // and "Lowest" are true of every metric the toggle offers.
     {
-      label: "Fastest stage",
+      label: `Highest ${spec.label.toLowerCase()}`,
       value: leader ? leader.bucket : NA,
-      basis: leader
-        ? `${stageValue(leader.value)} · ${leader.members_with_revenue} filed, ${leader.members} comparable`
-        : "no stage has a value this month",
+      basis: leader ? stageBasis(leader) : "no stage has a value this month",
       text: true,
     },
     {
-      label: "Slowest stage",
+      label: `Lowest ${spec.label.toLowerCase()}`,
       value: laggard ? laggard.bucket : NA,
-      basis: laggard
-        ? `${stageValue(laggard.value)} · ${laggard.members_with_revenue} filed, ${laggard.members} comparable`
-        : "needs two or more stages",
+      basis: laggard ? stageBasis(laggard) : "needs two or more stages",
       text: true,
     },
   ];

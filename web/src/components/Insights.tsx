@@ -57,13 +57,20 @@ import {
 import { SEGMENTS } from "../generated/segments";
 import type { AnalyticsRow, BucketCell, HeatmapMetric } from "../types";
 
-/** A MAD-unit score in words. Deliberately not "significant" at any level. */
+/**
+ * A MAD-unit score in words. Deliberately not "significant" at any level.
+ *
+ * Thresholds are in PLAIN MAD units, matching what the card prints and what the
+ * footnote's formula yields. They were 1/2/3 while the score carried the 1.4826
+ * consistency constant; dropping the constant scales them by the same factor,
+ * so the wording lands on exactly the same stages as before.
+ */
 function band(score: number | null): string {
   if (score === null) return "no spread to measure against";
   const a = Math.abs(score);
-  if (a >= 3) return "far from the other stages";
-  if (a >= 2) return "clearly apart from the other stages";
-  if (a >= 1) return "somewhat apart";
+  if (a >= 4.45) return "far from the other stages";
+  if (a >= 2.97) return "clearly apart from the other stages";
+  if (a >= 1.48) return "somewhat apart";
   return "in line with the other stages";
 }
 

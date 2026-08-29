@@ -17,7 +17,7 @@
  */
 
 import { accessPosture, type AccessEnv } from "./access";
-import { EXCLUDED_FROM_AGGREGATES } from "./generated/relationships";
+import { CONSOLIDATION } from "./generated/relationships";
 import { addMonths } from "./normalize";
 
 export interface Env extends AccessEnv {
@@ -122,8 +122,12 @@ async function meta(env: Env) {
   const [universe, months, sources, freshness, findings, gaps, severe, consolidated] =
     await env.DB.batch<any>([
     env.DB.prepare(
+      // active_from/active_to are here so the dashboard can apply the SAME
+      // obligation rule as quality()'s coverage basis. Without them the client
+      // fell back to status === 'active', which a company retired mid-window
+      // makes wrong in both directions - it can print "36 of 35 trackable filed".
       `SELECT ticker, display_name, name_zh, bucket, tier, market_hint, status,
-              successor, thesis, notes, sort_order
+              active_from, active_to, successor, thesis, notes, sort_order
          FROM universe ORDER BY sort_order, ticker`,
     ),
     env.DB.prepare(`SELECT month FROM month_spine ORDER BY month_idx`),
@@ -499,10 +503,29 @@ async function heatmap(env: Env, url: URL) {
   // the company detail all still return Wiwynn's own rows unchanged, because a
   // subsidiary's own filed revenue is perfectly real - it is only ADDING it to
   // its parent's that double counts.
-  const excludeSql = EXCLUDED_FROM_AGGREGATES.length
-    ? ` AND b.ticker NOT IN ${inClause(EXCLUDED_FROM_AGGREGATES.length)}`
-    : "";
-  const excludeBinds = [...EXCLUDED_FROM_AGGREGATES];
+  //
+  // AND THE EXCLUSION IS CONDITIONAL ON THE PARENT HAVING FILED THAT MONTH. If
+  // Wistron has not filed yet and Wiwynn has - the ordinary state between the
+  // 11th and 14th refresh passes - then no row on the page contains Wiwynn's
+  // revenue, and dropping it removes a real filing rather than a duplicate one.
+  // Unconditional exclusion understated the stage by exactly the child's own
+  // revenue in that case, while `members_*` went on describing the smaller set
+  // as though the omission were a de-duplication.
+  const pairSql = CONSOLIDATION.length
+    ? `,
+     pair(parent, child) AS (VALUES ${CONSOLIDATION.map(() => "(?, ?)").join(", ")}),
+     scoped AS (
+       SELECT a.* FROM all_rows a
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pair p
+            JOIN all_rows x ON x.ticker = p.parent
+                           AND x.month_idx = a.month_idx
+                           AND x.revenue_month IS NOT NULL
+           WHERE p.child = a.ticker)
+     )`
+    : `,
+     scoped AS (SELECT * FROM all_rows)`;
+  const excludeBinds = CONSOLIDATION.flatMap((c) => [c.parent, c.child]);
   // Aggregate per bucket-month from the LEVELS, then difference consecutive
   // months for acceleration - the same recompute-from-integers rule the
   // per-ticker view follows, applied one level up.
@@ -514,11 +537,12 @@ async function heatmap(env: Env, url: URL) {
   // counted in the numerator only. Hence a `members_*` count per ratio - and the
   // ratio is emitted only when the set is non-empty.
   const rows = await env.DB.prepare(
-    `WITH scoped AS (
-       -- The filtered universe, materialised ONCE so the membership comparison
-       -- below can reuse it without binding the filter parameters a second time.
-       SELECT * FROM analytics_base b WHERE ${sql}${excludeSql}
-     ),
+    `WITH all_rows AS (
+       -- The filtered universe, materialised ONCE so the de-duplication and the
+       -- membership comparison can both reuse it without binding the filter
+       -- parameters again.
+       SELECT * FROM analytics_base b WHERE ${sql}
+     )${pairSql},
      member AS (
        -- Who is actually behind the weighted YoY in each bucket-month. Same
        -- predicate as members_yoy, so this is that set enumerated rather than

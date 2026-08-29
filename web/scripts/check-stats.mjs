@@ -129,11 +129,39 @@ ok("nulls and NaN leave n", standouts([{ v: 1 }, { v: null }, { v: NaN }], (x) =
 ok("every score is finite when it is not null", standouts([{ v: 1 }, { v: 2 }, { v: 90 }], (x) => x.v)
   .ranked.every((r) => r.score === null || Number.isFinite(r.score)));
 
-group("forAggregate - the de-duplication");
-ok("drops the consolidated child", forAggregate([row({ ticker: "6669" }), row({ ticker: "3231" })]).length === 1);
-ok("keeps the parent", forAggregate([row({ ticker: "6669" }), row({ ticker: "3231" })])[0].ticker === "3231");
+group("forAggregate - the de-duplication, conditional on the parent filing");
+const pair = (parentRev, childRev, month = "2026-07") => [
+  row({ ticker: "3231", month, revenue_twd_thousands: parentRev }),
+  row({ ticker: "6669", month, revenue_twd_thousands: childRev }),
+];
+ok("both filed -> the child is dropped", (() => {
+  const out = forAggregate(pair(300, 100));
+  return out.length === 1 && out[0].ticker === "3231";
+})());
+ok("PARENT ABSENT -> the child is KEPT: nothing contains its revenue", (() => {
+  const out = forAggregate(pair(null, 100));
+  return out.length === 2;
+})());
+ok("parent filed, child did not -> still dropped, so it is not counted as absent", (() => {
+  // A consolidated child is never a separate line in the total, filed or not.
+  // Keeping its null row would make the basis report a phantom absence for a
+  // company whose figure is inside the parent's either way.
+  const out = forAggregate(pair(300, null));
+  return out.length === 1 && out[0].ticker === "3231";
+})());
+ok("decided per month, not across the set", (() => {
+  // Parent filed in June but not July; July's child must survive.
+  const rows = [...pair(300, 100, "2026-06"), ...pair(null, 120, "2026-07")];
+  const out = forAggregate(rows);
+  return out.filter((r) => r.month === "2026-06").length === 1
+      && out.filter((r) => r.month === "2026-07").length === 2;
+})());
+ok("a parent reporting zero still contains its child", (() => {
+  // 0 is a filing; null is not. sumRevenue draws the same distinction.
+  return forAggregate(pair(0, 100)).length === 1;
+})());
 ok("returns a copy, never mutating the caller's array", (() => {
-  const src = [row({ ticker: "3231" })];
+  const src = [row({ ticker: "3231", revenue_twd_thousands: 1 })];
   return forAggregate(src) !== src;
 })());
 

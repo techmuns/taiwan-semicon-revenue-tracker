@@ -68,7 +68,7 @@ def build_meta(conn: sqlite3.Connection, universe: Universe, sources: Sources) -
         "universe": _rows(
             conn,
             "SELECT ticker, display_name, name_zh, bucket, tier, market_hint, status,"
-            "       successor, thesis, notes, sort_order"
+            "       active_from, active_to, successor, thesis, notes, sort_order"
             "  FROM universe ORDER BY sort_order, ticker",
         ),
         "buckets": buckets,

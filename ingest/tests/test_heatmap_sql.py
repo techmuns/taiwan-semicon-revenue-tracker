@@ -30,11 +30,11 @@ from twrev.config import load_universe
 from twrev.schema import blank_row, row_hash
 
 STATEMENT_RE = re.compile(
-    r"const rows = await env\.DB\.prepare\(\s*`(WITH scoped AS.*?)`\s*,?\s*\)", re.S
+    r"const rows = await env\.DB\.prepare\(\s*`(WITH all_rows AS.*?)`\s*,?\s*\)", re.S
 )
 
 
-def heatmap_sql(repo_root: Path, *, exclude: tuple[str, ...] = ()) -> str:
+def heatmap_sql(repo_root: Path, *, exclude: tuple[tuple[str, str], ...] = ()) -> str:
     """The shipped statement, with its two interpolations resolved."""
     src = (repo_root / "worker" / "src" / "api.ts").read_text(encoding="utf-8")
     m = STATEMENT_RE.search(src)
@@ -43,12 +43,26 @@ def heatmap_sql(repo_root: Path, *, exclude: tuple[str, ...] = ()) -> str:
         "restructured - re-check the invariants in this file by hand before "
         "adjusting STATEMENT_RE."
     )
-    where = "b.month >= '2026-01'"
-    if exclude:
-        where += " AND b.ticker NOT IN (" + ",".join(f"'{t}'" for t in exclude) + ")"
+    pairs = (
+        ",\n     pair(parent, child) AS (VALUES "
+        + ", ".join(f"('{p}', '{c}')" for p, c in exclude)
+        + """),
+     scoped AS (
+       SELECT a.* FROM all_rows a
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pair p
+            JOIN all_rows x ON x.ticker = p.parent
+                           AND x.month_idx = a.month_idx
+                           AND x.revenue_month IS NOT NULL
+           WHERE p.child = a.ticker)
+     )"""
+        if exclude
+        else ",\n     scoped AS (SELECT * FROM all_rows)"
+    )
     return (
         m.group(1)
-        .replace("${sql}${excludeSql}", where)
+        .replace("${sql}", "b.month >= '2026-01'")
+        .replace("${pairSql}", pairs)
         .replace("WHERE month >= ?", "WHERE month >= '2026-02'")
     )
 
@@ -85,7 +99,7 @@ ANALOG = ["4919", "6138", "8081"]
 
 
 def test_statement_is_extractable(repo_root):
-    assert "WITH scoped AS" in heatmap_sql(repo_root)
+    assert "WITH all_rows AS" in heatmap_sql(repo_root)
 
 
 def test_membership_change_is_identity_not_count(repo_root, conn):
@@ -163,7 +177,41 @@ def test_excluded_ticker_never_reaches_an_aggregate(repo_root, conn):
         mk("6669", "2026-01", 100000, 80000), mk("6669", "2026-02", 110000, 80000),
     ])
     with_child = run(conn, heatmap_sql(repo_root))[("Rack / ODM", "2026-02")]
-    without = run(conn, heatmap_sql(repo_root, exclude=("6669",)))[("Rack / ODM", "2026-02")]
+    without = run(conn, heatmap_sql(repo_root, exclude=(("3231", "6669"),)))[("Rack / ODM", "2026-02")]
     assert with_child["revenue"] == 420000 and with_child["members_yoy"] == 2
     assert without["revenue"] == 310000, "the child's revenue must leave the sum"
     assert without["members_yoy"] == 1, "and leave the basis reported beside it"
+
+
+def test_child_is_kept_when_the_parent_has_not_filed(repo_root, conn):
+    """The exclusion is conditional, and this is why.
+
+    If Wistron has not filed and Wiwynn has - the ordinary state between the
+    11th and 14th refresh passes - then no row on the page contains Wiwynn's
+    revenue. Dropping it would remove a real filing rather than a duplicate one,
+    understating the stage by exactly the child's own revenue while `members_*`
+    described the smaller set as though the omission were a de-duplication.
+    """
+    store.upsert_rows(conn, [
+        # January is the shoulder month the statement drops after using it as
+        # the LAG, so both visible cases live in February and March.
+        mk("3231", "2026-01", 290000, 200000),
+        mk("6669", "2026-01", 95000, 80000),
+        mk("3231", "2026-02", 300000, 200000),
+        mk("6669", "2026-02", 100000, 80000),
+        # March: the child filed, the parent has not yet.
+        mk("3231", "2026-03", None, None),
+        mk("6669", "2026-03", 110000, 80000),
+    ])
+    out = run(conn, heatmap_sql(repo_root, exclude=(("3231", "6669"),)))
+
+    feb = out[("Rack / ODM", "2026-02")]
+    assert feb["revenue"] == 300000, "both filed, so the child is inside the parent"
+    assert feb["members_yoy"] == 1
+
+    mar = out[("Rack / ODM", "2026-03")]
+    assert mar["revenue"] == 110000, (
+        "the parent did not file, so the child's revenue is the only figure there "
+        f"is - got {mar['revenue']}"
+    )
+    assert mar["members_yoy"] == 1, "and it is counted in the basis"

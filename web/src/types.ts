@@ -15,8 +15,11 @@ export interface UniverseRow {
   bucket: string;
   tier: number;
   market_hint: string | null;
-  /** "active" | "merged" - "merged" means no filing obligation, not missing data. */
+  /** "active" | "merged" | "delisted" | "suspended" - not all of them owe a filing. */
   status: string;
+  /** The months this company owed a filing. Null means unbounded on that side. */
+  active_from: string | null;
+  active_to: string | null;
   successor: string | null;
   thesis: string | null;
   notes: string | null;

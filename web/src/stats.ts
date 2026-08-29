@@ -15,19 +15,36 @@
  *    TSMC.
  */
 
-import { EXCLUDED_FROM_AGGREGATES } from "./generated/relationships";
+import { CONSOLIDATION } from "./generated/relationships";
 import type { AnalyticsRow } from "./types";
 
-const EXCLUDED = new Set(EXCLUDED_FROM_AGGREGATES);
+export interface Agg {
+  value: number | null;
+  /** How many companies the value was computed over. */
+  n: number;
+  /** How many were skipped because the input was null. */
+  missing: number;
+}
 
 /**
  * Drop companies whose revenue is ALREADY INSIDE another tracked company's
  * reported figure, before anything is summed across companies.
  *
  * Wistron consolidates Wiwynn, so both filing separately means Wiwynn's revenue
- * appears twice in any naive sum of the universe - once standalone and once
- * inside Wistron. Measured against the live data that overstated the universe
- * total by 4.55% and the Rack / ODM stage by 6.70%.
+ * appears twice in any naive sum - once standalone and once inside Wistron.
+ * Measured against the live data that overstated the universe total by 4.55%
+ * and the Rack / ODM stage by 6.70%.
+ *
+ * **THE EXCLUSION IS CONDITIONAL ON THE PARENT HAVING FILED**, per month. If
+ * Wistron has not filed yet and Wiwynn has - the ordinary state between the 11th
+ * and 14th refresh passes - then nothing on the page contains Wiwynn's revenue,
+ * and dropping it removes a real filing rather than a duplicate one.
+ * Unconditional exclusion understated the July universe total by 5.16% in
+ * exactly that case, while the basis line went on asserting "1 inside another
+ * filer".
+ *
+ * Decided month by month, because a set of rows spanning months (the Buckets tab
+ * passes one) must not let a parent's June filing suppress its child's July.
  *
  * **Call this before a SUM, and only before a SUM.** A subsidiary's own filed
  * revenue is perfectly real: its row, its series, its growth and its place in
@@ -36,20 +53,25 @@ const EXCLUDED = new Set(EXCLUDED_FROM_AGGREGATES);
  * not use this - a median counts each company once, which is not the same
  * arithmetic and not the same error.
  *
- * The excluded list is generated from config/relationships.yaml; see
- * src/generated/relationships.ts.
+ * The pairs are generated from config/relationships.yaml.
  */
 export function forAggregate(rows: readonly AnalyticsRow[]): AnalyticsRow[] {
-  if (EXCLUDED.size === 0) return [...rows];
-  return rows.filter((r) => !EXCLUDED.has(r.ticker));
-}
+  if (CONSOLIDATION.length === 0) return [...rows];
 
-export interface Agg {
-  value: number | null;
-  /** How many companies the value was computed over. */
-  n: number;
-  /** How many were skipped because the input was null. */
-  missing: number;
+  const filedByMonth = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (r.revenue_twd_thousands === null) continue;
+    const set = filedByMonth.get(r.month) ?? new Set<string>();
+    set.add(r.ticker);
+    filedByMonth.set(r.month, set);
+  }
+
+  return rows.filter(
+    (r) =>
+      !CONSOLIDATION.some(
+        (c) => c.child === r.ticker && (filedByMonth.get(r.month)?.has(c.parent) ?? false),
+      ),
+  );
 }
 
 export function median(values: number[]): number | null {
@@ -235,7 +257,7 @@ export function mad(values: number[]): number | null {
 export interface Standout<T> {
   item: T;
   value: number;
-  /** (value - median) / (1.4826 * MAD). Null when the MAD is 0. */
+  /** (value - median) / MAD, in plain MAD units. Null when the MAD is 0. */
   score: number | null;
 }
 
@@ -261,9 +283,14 @@ export interface Standout<T> {
  * significant. It answers "which stage is most unlike the others this month",
  * which is a real and useful question, and refuses the one it cannot answer.
  *
- * The scale constant 1.4826 makes the MAD comparable to a standard deviation
- * for normally-distributed data. It is a unit convention here, not a normality
- * claim - nothing about these ten numbers is assumed normal.
+ * The score is in PLAIN MAD UNITS: (value - median) / MAD. The usual 1.4826
+ * consistency constant, which rescales a MAD to be comparable with a standard
+ * deviation under normality, is deliberately NOT applied - it was, and the
+ * result was labelled "MAD" on screen beside a footnote printing the median,
+ * the MAD and the formula, so a reader checking the arithmetic got -5.3 where
+ * the card said -3.6. The constant bought nothing here: this is a RANK, the
+ * transform is monotone so the ordering is identical, and normality is exactly
+ * what these ten numbers are not assumed to have.
  */
 export function standouts<T>(
   items: readonly T[],
@@ -280,7 +307,7 @@ export function standouts<T>(
   // A zero MAD means over half the members share one value. The ratio would be
   // infinite for everyone else, which is not a ranking - it is a division by
   // zero wearing a number's clothes.
-  const scale = spread === null || spread === 0 ? null : 1.4826 * spread;
+  const scale = spread === null || spread === 0 ? null : spread;
   const ranked = pairs
     .map((p) => ({
       ...p,

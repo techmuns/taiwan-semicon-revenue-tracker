@@ -371,7 +371,11 @@ function OverviewTab({
         meta={meta}
         bucketCells={heat.data?.cells ?? null}
         latestMonth={latestMonth}
-        metric={metric}
+        // The metric the CELLS carry, not the one the toggle is on. Between a
+        // click and the response landing those differ, and the KPI row took its
+        // unit from the toggle while still holding the previous metric's values -
+        // printing a percentage-point figure with a % sign for that moment.
+        metric={heat.data?.metric ?? metric}
         filtered={
           filters.tickers.length > 0 || filters.buckets.length > 0 || filters.tiers.length > 0
         }
