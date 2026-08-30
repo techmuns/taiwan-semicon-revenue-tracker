@@ -1,0 +1,104 @@
+# Build the dashboard and deploy the Worker.
+#
+# WHY THIS EXISTS AT ALL. Deploying by hand is two commands, and both of them
+# went wrong on a real machine on 30 Aug:
+#
+#   1. `npm --prefix web run build` was run from inside worker/, so it looked
+#      for worker/web/package.json, failed, and built nothing.
+#   2. `wrangler deploy` was on a separate line rather than chained, so it ran
+#      anyway - shipping fresh Worker code on top of the STALE bundle left in
+#      worker/public from an earlier build.
+#
+# The result is the worst kind of half-deploy: the API answers with the new
+# code and reports success, while the browser is served a months-old page. It
+# looks like "the changes didn't work" rather than "the deploy didn't finish".
+#
+# worker/public/ is gitignored, so it is never carried by a checkout. That is
+# correct - a committed build output goes stale silently - but it means the
+# build step is not optional and its absence is not visible. Here the two
+# steps are one job: no build, no deploy.
+#
+# The token must come from the account that owns the Worker (a441977d...).
+# wrangler.toml pins that account id, so a token for a different account fails
+# here rather than quietly creating a SECOND Worker of the same name at a
+# different *.workers.dev - which is a decoy that looks fine while the real
+# site stays broken.
+#
+# Manual only. Nothing here writes data; it publishes code, and publishing is
+# a decision rather than a consequence of pushing.
+
+name: deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Fail loudly and immediately rather than inside wrangler, where a
+      # missing token surfaces as an authentication error that reads like a
+      # Cloudflare outage.
+      - name: Check the Cloudflare token is present
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it under" \
+                 "Settings > Secrets and variables > Actions, from the account" \
+                 "that owns the Worker. It needs Workers Scripts:Edit to deploy."
+            exit 1
+          fi
+
+      - name: Install
+        run: npm --prefix web ci
+
+      # `npm run build` runs the theme-parity check, the stats assertions and
+      # tsc before vite. A failure in any of them must stop the deploy, which
+      # is the whole reason the build lives in the same job.
+      - name: Build the dashboard
+        run: npm --prefix web run build
+
+      # The build writes into worker/public. If it is empty we would deploy a
+      # Worker with no assets and serve a blank page, so check before shipping
+      # rather than after.
+      - name: Check the bundle exists
+        run: |
+          ls -la worker/public worker/public/assets
+          test -f worker/public/index.html
+          ls worker/public/assets/*.js >/dev/null
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4 deploy -c worker/wrangler.toml
+
+      # Read the deployed page back and confirm the bundle the browser will be
+      # given is the one just built. This is the check that would have caught
+      # the half-deploy: the API looked new, the page did not.
+      - name: Verify the served bundle is the one just built
+        run: |
+          BUILT="$(basename "$(ls worker/public/assets/*.js | grep -v '\.map$' | head -1)")"
+          echo "built:  $BUILT"
+          for i in 1 2 3 4 5; do
+            SERVED="$(curl -sS https://taiwan-semicon-revenue.tech-441.workers.dev/ \
+                      | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 | sed 's|assets/||')"
+            echo "served: $SERVED (attempt $i)"
+            [ "$SERVED" = "$BUILT" ] && exit 0
+            sleep 10
+          done
+          echo "::error::the deployed page still serves $SERVED, not $BUILT"
+          exit 1

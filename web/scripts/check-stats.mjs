@@ -22,11 +22,18 @@
  * Run: node scripts/check-stats.mjs
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+// esbuild's JS API, NOT node_modules/.bin/esbuild. The binary there is
+// `esbuild` on Unix and `esbuild.exe` on Windows, so spawning the bare name
+// died with ENOENT on every Windows checkout - which meant `npm run build`
+// could not complete at all on Windows and the dashboard silently shipped
+// whatever bundle happened to be lying in worker/public. The API has no such
+// name; it resolves the right binary for the platform itself.
+import { build } from "esbuild";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const web = join(here, "..");
@@ -35,12 +42,14 @@ const out = mkdtempSync(join(tmpdir(), "twrev-stats-"));
 let stats;
 try {
   const bundle = join(out, "stats.mjs");
-  execFileSync(
-    join(web, "node_modules", ".bin", "esbuild"),
-    [join(web, "src", "stats.ts"), "--bundle", "--format=esm", "--platform=node",
-     `--outfile=${bundle}`, "--log-level=error"],
-    { stdio: ["ignore", "ignore", "inherit"] },
-  );
+  await build({
+    entryPoints: [join(web, "src", "stats.ts")],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    outfile: bundle,
+    logLevel: "error",
+  });
   stats = await import(pathToFileURL(bundle).href);
 } catch (err) {
   console.error("could not bundle src/stats.ts:", err.message);
