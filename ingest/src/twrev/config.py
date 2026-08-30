@@ -199,7 +199,9 @@ def load_universe(path: Path | None = None) -> Universe:
             thesis=entry.get("thesis"),
             notes=entry.get("notes"),
             # Preserve file order so the dashboard renders buckets in
-            # supply-chain sequence rather than alphabetically.
+            # supply-chain sequence rather than alphabetically. What makes that
+            # sequence right is tested, not asserted: see
+            # test_relationships.py::test_stage_order_follows_the_supply_edges.
             sort_order=i,
         ))
 

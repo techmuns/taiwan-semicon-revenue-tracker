@@ -43,6 +43,14 @@ class Consolidation:
     stake: str
     confidence: str
     evidence: str
+    # The document the treatment was read OFF, not the day someone typed it.
+    # Required, because an accounting treatment is a fact about a date: TSMC's
+    # VIS holding was equity method in the FY2025 20-F and the same record's
+    # own evidence describes a May 2026 sale that ends that. Rendering a bare
+    # "equity method" told a reader in August 2026 something the record itself
+    # contradicted. There is no `as_of` default for the same reason there is no
+    # default for `evidence`: an undated treatment is the bug.
+    as_of: str
 
 
 @dataclass(frozen=True)
@@ -88,7 +96,7 @@ def _pairs(doc: dict[str, Any], key: str, path: Path) -> list[Consolidation]:
         where = f"{path}: {key}[{i}]"
         if not isinstance(raw, dict):
             raise ConfigError(f"{where}: expected a mapping")
-        for f in ("parent", "child", "treatment", "evidence"):
+        for f in ("parent", "child", "treatment", "evidence", "as_of"):
             if not raw.get(f):
                 raise ConfigError(f"{where}: missing required field {f!r}")
         treatment = str(raw["treatment"])
@@ -107,6 +115,7 @@ def _pairs(doc: dict[str, Any], key: str, path: Path) -> list[Consolidation]:
                 stake=str(raw.get("stake", "unknown")),
                 confidence=confidence,
                 evidence=str(raw["evidence"]).strip(),
+                as_of=str(raw["as_of"]).strip(),
             )
         )
     return out
@@ -308,6 +317,8 @@ def render_ts(rel: Relationships, universe: Universe) -> str:
         "export interface ClearedPair extends ConsolidationPair {",
         "  treatment: string;",
         "  stake: string;",
+        "  /** The document the treatment was read off. Rendered beside it. */",
+        "  asOf: string;",
         "}",
         "",
         "export const CLEARED: readonly ClearedPair[] = [",
@@ -317,7 +328,8 @@ def render_ts(rel: Relationships, universe: Universe) -> str:
             f'  {{ parent: "{c.parent}", child: "{c.child}", '
             f'parentName: "{name.get(c.parent, c.parent)}", '
             f'childName: "{name.get(c.child, c.child)}", '
-            f'treatment: "{c.treatment}", stake: "{c.stake}" }},'
+            f'treatment: "{c.treatment}", stake: "{c.stake}", '
+            f'asOf: {_ts(c.as_of)} }},'
         )
     lines += [
         "];",

@@ -42,6 +42,7 @@ consolidation:
     child: "6669"           # Wiwynn
     treatment: consolidated
     stake: "40.13% group / 35.45% held directly by Wistron Corp (2025-06-30)"
+    as_of: "Wistron 2025 Q2 consolidated statements, Note 4(b)"
     confidence: high
     evidence: >-
       Wistron 2025 Q2 consolidated financial statements, Note 4(b) "List of
@@ -72,6 +73,7 @@ cleared:
     child: "3443"           # Global Unichip
     treatment: equity_method
     stake: "34.84%"
+    as_of: "GUC audited FY2025 statements, Note 28; TSMC 2024 annual report"
     confidence: high
     evidence: >-
       GUC's audited FY2025 consolidated financial statements, Note 28 (related
@@ -88,6 +90,16 @@ cleared:
     child: "5347"           # VIS
     treatment: equity_method
     stake: "28% at FY2025, 27.6% at 2026-02-28, ~19% after the May 2026 sale"
+    # READ THIS BEFORE QUOTING THE TREATMENT. equity_method is what the FY2025
+    # 20-F says, and it is the last AUDITED statement of it. The evidence below
+    # then describes a May 2026 sale to ~19% that, on its face, ends equity
+    # method in favour of fair value - but no audited statement covering that
+    # sale has been published, so writing `fvoci` here would be asserting an
+    # outcome nobody has filed yet. Dated instead of guessed. Either way the
+    # pair stays OUT of the de-duplication: equity method and fair value both
+    # mean VIS's revenue is not inside TSMC's, so no figure on the dashboard
+    # turns on which of the two it is. Recheck at TSMC's FY2026 20-F.
+    as_of: "TSMC FY2025 Form 20-F, Note 14 - superseded by the May 2026 sale"
     confidence: high
     evidence: >-
       TSMC FY2025 Form 20-F, Note 14 "Investments Accounted for Using Equity
@@ -105,6 +117,7 @@ cleared:
     child: "3037"           # Unimicron
     treatment: equity_method
     stake: "13.01%"
+    as_of: "UMC FY2025 Form 20-F, Note 7"
     confidence: high
     evidence: >-
       UMC FY2025 Form 20-F, Note 7 "Investments Accounted for Under the Equity
@@ -125,6 +138,7 @@ cleared:
     child: "6147"           # Chipbond
     treatment: fvoci
     stake: "7.14% direct, ~8.95% including UMC's venture arm"
+    as_of: "UMC FY2025 Form 20-F, Note (3)"
     confidence: high
     evidence: >-
       UMC FY2025 Form 20-F, Note (3) "Financial Assets at Fair Value through Other
@@ -142,6 +156,7 @@ cleared:
     child: "3661"           # Alchip
     treatment: fvoci
     stake: "0.86%"
+    as_of: "Wistron 2025 Q2 consolidated statements, Table 3"
     confidence: high
     evidence: >-
       Recorded only to close the loop on the one other intra-universe

@@ -33,6 +33,7 @@ PAIR = """
       - parent: "3231"
         child: "6669"
         treatment: consolidated
+        as_of: "test fixture"
         evidence: control retained
     """
 
@@ -80,6 +81,7 @@ def test_self_consolidation_is_rejected(tmp_path, universe):
           - parent: "3231"
             child: "3231"
             treatment: consolidated
+            as_of: "test fixture"
             evidence: nonsense
         """)
     with pytest.raises(ConfigError, match="cannot consolidate itself"):
@@ -92,10 +94,12 @@ def test_two_parents_for_one_child_is_rejected(tmp_path, universe):
           - parent: "3231"
             child: "6669"
             treatment: consolidated
+            as_of: "test fixture"
             evidence: a
           - parent: "2317"
             child: "6669"
             treatment: consolidated
+            as_of: "test fixture"
             evidence: b
         """)
     with pytest.raises(ConfigError, match="consolidated into both"):
@@ -108,10 +112,12 @@ def test_cycle_is_rejected(tmp_path, universe):
           - parent: "3231"
             child: "6669"
             treatment: consolidated
+            as_of: "test fixture"
             evidence: a
           - parent: "6669"
             child: "3231"
             treatment: consolidated
+            as_of: "test fixture"
             evidence: b
         """)
     with pytest.raises(ConfigError, match="cycle"):
@@ -126,6 +132,7 @@ def test_equity_method_in_consolidation_is_rejected(tmp_path, universe):
           - parent: "2330"
             child: "3443"
             treatment: equity_method
+            as_of: "test fixture"
             evidence: TSMC equity-methods GUC
         """)
     with pytest.raises(ConfigError, match="Only 'consolidated'"):
@@ -140,6 +147,7 @@ def test_untracked_ticker_is_rejected(tmp_path, universe):
           - parent: "9999"
             child: "6669"
             treatment: consolidated
+            as_of: "test fixture"
             evidence: made up
         """)
     with pytest.raises(ConfigError, match="not in the universe"):
@@ -152,11 +160,13 @@ def test_same_pair_in_both_lists_is_rejected(tmp_path, universe):
           - parent: "3231"
             child: "6669"
             treatment: consolidated
+            as_of: "test fixture"
             evidence: a
         cleared:
           - parent: "3231"
             child: "6669"
             treatment: equity_method
+            as_of: "test fixture"
             evidence: b
         """)
     with pytest.raises(ConfigError, match="BOTH"):
@@ -286,3 +296,107 @@ def test_empty_relationships_generate_a_null_note(tmp_path, universe):
     path = write(tmp_path, "consolidation: []\n")
     ts = rel.render_ts(rel.load_relationships(path, universe), universe)
     assert "if (CONSOLIDATION.length === 0) return null;" in ts
+
+
+# --------------------------------------------------------------------------
+# The stage order and the supply edges describe the SAME chain, and until
+# 2026-08 they disagreed about it completely.
+#
+# `sort_order` is file order in universe.yaml, and config.py says it exists so
+# the dashboard renders stages "in supply-chain sequence". App.tsx repeated the
+# claim and spelled the sequence out. Nothing checked it, and it was wrong:
+# thermal, power and semi equipment were listed AFTER the stages they sell into,
+# so every one of the 18 recorded edges ran backwards up the page. A reader
+# taking the row order at face value would have concluded that fab equipment
+# sits downstream of the servers it helps build.
+#
+# The edges are the authority here - each carries a citation to a 20-F or an
+# annual report, while the ordering carried none - so the ordering moved.
+# --------------------------------------------------------------------------
+
+# TSMC ships wafers to ASE for packaging AND buys outsourced back-end capacity
+# from it, so this pair points both ways at once and no linear order can hold
+# it. Named rather than silently tolerated: a second exception appearing here
+# means somebody should re-read the chain, not widen the allow-list.
+BIDIRECTIONAL = {("3711", "2330")}
+
+
+def test_stage_order_follows_the_supply_edges():
+    u = load_universe()
+    edges = rel.load_relationships().edges
+    by_ticker = {c.ticker: c for c in u.companies}
+
+    order: list[str] = []
+    for c in sorted(u.companies, key=lambda x: x.sort_order):
+        if c.bucket not in order:
+            order.append(c.bucket)
+    pos = {b: i for i, b in enumerate(order)}
+
+    backwards = [
+        (e.from_ticker, e.to_ticker)
+        for e in edges
+        if pos[by_ticker[e.from_ticker].bucket] > pos[by_ticker[e.to_ticker].bucket]
+    ]
+    unexpected = [p for p in backwards if p not in BIDIRECTIONAL]
+    assert not unexpected, (
+        "these edges run backwards against the stage order, so the dashboard "
+        "renders a supplier below its own customer: "
+        + ", ".join(
+            f"{f} {by_ticker[f].display_name} [{by_ticker[f].bucket}] -> "
+            f"{t} {by_ticker[t].display_name} [{by_ticker[t].bucket}]"
+            for f, t in unexpected
+        )
+    )
+
+
+def test_the_bidirectional_exception_still_exists():
+    """If ASE -> TSMC is ever removed or reversed, BIDIRECTIONAL is stale and
+    the test above silently permits a real inversion."""
+    pairs = {(e.from_ticker, e.to_ticker) for e in rel.load_relationships().edges}
+    assert BIDIRECTIONAL <= pairs, (
+        f"BIDIRECTIONAL names {BIDIRECTIONAL - pairs}, which is no longer an "
+        "edge. Drop it from the allow-list rather than leaving it to excuse "
+        "some future inversion."
+    )
+
+
+def test_buckets_list_matches_the_order_the_companies_imply():
+    """universe.yaml states the stage order twice - once in `buckets:` and once
+    by the order companies appear. Two copies of one fact drift."""
+    u = load_universe()
+    implied: list[str] = []
+    for c in sorted(u.companies, key=lambda x: x.sort_order):
+        if c.bucket not in implied:
+            implied.append(c.bucket)
+    assert list(u.buckets) == implied, (
+        f"`buckets:` says {list(u.buckets)}\nbut the company order implies {implied}"
+    )
+
+
+def test_every_pair_is_dated():
+    """An accounting treatment is a fact about a date.
+
+    TSMC's VIS holding is why this is required rather than optional: the record
+    said `equity_method` flatly while its own evidence described a May 2026 sale
+    that ends it, and the dashboard rendered the bare word to a reader in
+    August. Neither field was wrong on its own - the pairing was.
+    """
+    r = rel.load_relationships()
+    for c in (*r.consolidation, *r.cleared):
+        assert c.as_of.strip(), f"{c.parent}->{c.child} has no as_of"
+
+
+def test_as_of_is_required_not_defaulted(tmp_path, universe):
+    """A default would let the next pair in be undated and look fine."""
+    path = write(tmp_path, """
+        consolidation: []
+        cleared:
+          - parent: "2330"
+            child: "3443"
+            treatment: equity_method
+            stake: "34.84%"
+            confidence: high
+            evidence: some evidence
+        """)
+    with pytest.raises(ConfigError, match="as_of"):
+        rel.load_relationships(path, universe)

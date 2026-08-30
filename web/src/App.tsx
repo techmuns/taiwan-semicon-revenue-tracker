@@ -479,10 +479,20 @@ function aggLabel(d: BucketHeatmap | undefined, requested: "weighted" | "equal")
 /**
  * Supply-chain order for the stage rows, read off `meta.universe`.
  *
- * The universe arrives sorted by `sort_order`, which encodes the chain: silicon
- * -> packaging -> substrate -> rack -> networking -> thermal -> power ->
- * equipment -> the two control groups. First appearance of each stage in that
+ * The universe arrives sorted by `sort_order`, which encodes the chain:
+ * equipment -> silicon -> packaging -> substrate -> thermal -> power -> rack ->
+ * networking -> the two control groups. First appearance of each stage in that
  * list therefore IS the chain order, with no second list to keep in sync.
+ *
+ * That order is checked, not asserted. `test_stage_order_follows_the_supply
+ * _edges` walks every edge in config/relationships.yaml and requires the seller
+ * to sit at or before the buyer. It runs 17 of 18 forward; the exception is
+ * ASE -> TSMC, which is genuinely two-directional (TSMC ships wafers to ASE for
+ * packaging, and separately buys outsourced capacity back from it), so no
+ * linear order can satisfy it and the test names it explicitly.
+ *
+ * The previous order put thermal, power and equipment AFTER the stages they
+ * feed, which made every one of those 18 edges run backwards up the page.
  *
  * `/api/heatmap` returns `ORDER BY bucket`, i.e. alphabetically, so without this
  * the Overview matrix read AI Silicon, Advanced Packaging, Analog Cycle, Legacy,

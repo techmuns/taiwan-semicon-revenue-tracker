@@ -35,14 +35,16 @@ export const EXCLUDED_FROM_AGGREGATES: readonly string[] = [
 export interface ClearedPair extends ConsolidationPair {
   treatment: string;
   stake: string;
+  /** The document the treatment was read off. Rendered beside it. */
+  asOf: string;
 }
 
 export const CLEARED: readonly ClearedPair[] = [
-  { parent: "2303", child: "3037", parentName: "UMC", childName: "Unimicron", treatment: "equity_method", stake: "13.01%" },
-  { parent: "2303", child: "6147", parentName: "UMC", childName: "Chipbond", treatment: "fvoci", stake: "7.14% direct, ~8.95% including UMC's venture arm" },
-  { parent: "2330", child: "3443", parentName: "TSMC", childName: "Global Unichip", treatment: "equity_method", stake: "34.84%" },
-  { parent: "2330", child: "5347", parentName: "TSMC", childName: "VIS", treatment: "equity_method", stake: "28% at FY2025, 27.6% at 2026-02-28, ~19% after the May 2026 sale" },
-  { parent: "3231", child: "3661", parentName: "Wistron", childName: "Alchip", treatment: "fvoci", stake: "0.86%" },
+  { parent: "2303", child: "3037", parentName: "UMC", childName: "Unimicron", treatment: "equity_method", stake: "13.01%", asOf: "UMC FY2025 Form 20-F, Note 7" },
+  { parent: "2303", child: "6147", parentName: "UMC", childName: "Chipbond", treatment: "fvoci", stake: "7.14% direct, ~8.95% including UMC's venture arm", asOf: "UMC FY2025 Form 20-F, Note (3)" },
+  { parent: "2330", child: "3443", parentName: "TSMC", childName: "Global Unichip", treatment: "equity_method", stake: "34.84%", asOf: "GUC audited FY2025 statements, Note 28; TSMC 2024 annual report" },
+  { parent: "2330", child: "5347", parentName: "TSMC", childName: "VIS", treatment: "equity_method", stake: "28% at FY2025, 27.6% at 2026-02-28, ~19% after the May 2026 sale", asOf: "TSMC FY2025 Form 20-F, Note 14 - superseded by the May 2026 sale" },
+  { parent: "3231", child: "3661", parentName: "Wistron", childName: "Alchip", treatment: "fvoci", stake: "0.86%", asOf: "Wistron 2025 Q2 consolidated statements, Table 3" },
 ];
 
 /**

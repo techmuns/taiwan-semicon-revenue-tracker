@@ -565,6 +565,11 @@ function Relationships() {
                             ? "fair value, passive"
                             : c.treatment}{" "}
                         — not inside the parent
+                        {/* An accounting treatment is a fact about a date, and
+                            one of these is already known to have moved on. A
+                            bare "equity method" read as present tense is the
+                            thing this line exists to prevent. */}
+                        <div style={{ opacity: 0.75, fontSize: 10 }}>per {c.asOf}</div>
                       </td>
                     </tr>
                   ))}

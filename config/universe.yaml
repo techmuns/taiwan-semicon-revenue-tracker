@@ -19,18 +19,43 @@
 version: 1
 
 buckets:
+  - Semi Equipment / Consumables
   - AI Silicon
   - Advanced Packaging / Test
   - Substrate / AI PCB / Materials
-  - Rack / ODM
-  - Networking
   - Thermal
   - Power / Data Center Electrical
-  - Semi Equipment / Consumables
+  - Rack / ODM
+  - Networking
   - Legacy / Mature Node Control Group
   - Analog Cycle
 
 tickers:
+  # ------------------------------------------- Semi Equipment / Consumables
+  - ticker: "3680"
+    display_name: Gudeng
+    name_zh: 家登
+    bucket: Semi Equipment / Consumables
+    tier: 1
+    market_hint: otc
+    thesis: EUV / advanced-node fab activity
+
+  - ticker: "1560"
+    display_name: Kinik
+    name_zh: 中砂
+    bucket: Semi Equipment / Consumables
+    tier: 2
+    market_hint: sii
+    thesis: Wafer/process consumables (Disco)
+
+  - ticker: "5434"
+    display_name: Topco Scientific
+    name_zh: 崇越
+    bucket: Semi Equipment / Consumables
+    tier: 2
+    market_hint: sii
+    thesis: Semiconductor materials, but broad
+
   # ---------------------------------------------------------------- AI Silicon
   - ticker: "2330"
     display_name: TSMC
@@ -137,64 +162,6 @@ tickers:
     market_hint: sii
     thesis: AI server PCB demand
 
-  # ------------------------------------------------------------- Rack / ODM
-  - ticker: "6669"
-    display_name: Wiwynn
-    name_zh: 緯穎
-    bucket: Rack / ODM
-    tier: 1
-    market_hint: sii
-    thesis: One of the cleanest hyperscaler AI server signals
-
-  - ticker: "2382"
-    display_name: Quanta
-    name_zh: 廣達
-    bucket: Rack / ODM
-    tier: 1
-    market_hint: sii
-    thesis: AI server / rack build
-
-  - ticker: "3231"
-    display_name: Wistron
-    name_zh: 緯創
-    bucket: Rack / ODM
-    tier: 1
-    market_hint: sii
-    thesis: AI server / rack build
-
-  - ticker: "2317"
-    display_name: Hon Hai
-    name_zh: 鴻海
-    bucket: Rack / ODM
-    tier: 1
-    market_hint: sii
-    thesis: Huge AI rack exposure, though diversified
-
-  - ticker: "2356"
-    display_name: Inventec
-    name_zh: 英業達
-    bucket: Rack / ODM
-    tier: 2
-    market_hint: sii
-    thesis: Server demand, less AI-pure
-
-  - ticker: "2376"
-    display_name: Gigabyte
-    name_zh: 技嘉
-    bucket: Rack / ODM
-    tier: 2
-    market_hint: sii
-    thesis: GPU/enterprise server demand, but broader product mix
-
-  # ------------------------------------------------------------ Networking
-  - ticker: "2345"
-    display_name: Accton
-    name_zh: 智邦
-    bucket: Networking
-    tier: 1
-    market_hint: sii
-    thesis: AI Ethernet switching / network build-out
-
   # --------------------------------------------------------------- Thermal
   - ticker: "3017"
     display_name: Asia Vital Components
@@ -253,30 +220,63 @@ tickers:
     market_hint: sii
     thesis: Server power supply demand
 
-  # ------------------------------------------- Semi Equipment / Consumables
-  - ticker: "3680"
-    display_name: Gudeng
-    name_zh: 家登
-    bucket: Semi Equipment / Consumables
+  # ------------------------------------------------------------- Rack / ODM
+  - ticker: "6669"
+    display_name: Wiwynn
+    name_zh: 緯穎
+    bucket: Rack / ODM
     tier: 1
-    market_hint: otc
-    thesis: EUV / advanced-node fab activity
+    market_hint: sii
+    thesis: One of the cleanest hyperscaler AI server signals
 
-  - ticker: "1560"
-    display_name: Kinik
-    name_zh: 中砂
-    bucket: Semi Equipment / Consumables
+  - ticker: "2382"
+    display_name: Quanta
+    name_zh: 廣達
+    bucket: Rack / ODM
+    tier: 1
+    market_hint: sii
+    thesis: AI server / rack build
+
+  - ticker: "3231"
+    display_name: Wistron
+    name_zh: 緯創
+    bucket: Rack / ODM
+    tier: 1
+    market_hint: sii
+    thesis: AI server / rack build
+
+  - ticker: "2317"
+    display_name: Hon Hai
+    name_zh: 鴻海
+    bucket: Rack / ODM
+    tier: 1
+    market_hint: sii
+    thesis: Huge AI rack exposure, though diversified
+
+  - ticker: "2356"
+    display_name: Inventec
+    name_zh: 英業達
+    bucket: Rack / ODM
     tier: 2
     market_hint: sii
-    thesis: Wafer/process consumables (Disco)
+    thesis: Server demand, less AI-pure
 
-  - ticker: "5434"
-    display_name: Topco Scientific
-    name_zh: 崇越
-    bucket: Semi Equipment / Consumables
+  - ticker: "2376"
+    display_name: Gigabyte
+    name_zh: 技嘉
+    bucket: Rack / ODM
     tier: 2
     market_hint: sii
-    thesis: Semiconductor materials, but broad
+    thesis: GPU/enterprise server demand, but broader product mix
+
+  # ------------------------------------------------------------ Networking
+  - ticker: "2345"
+    display_name: Accton
+    name_zh: 智邦
+    bucket: Networking
+    tier: 1
+    market_hint: sii
+    thesis: AI Ethernet switching / network build-out
 
   # ------------------------------- Legacy / Mature Node Control Group
   - ticker: "2303"
