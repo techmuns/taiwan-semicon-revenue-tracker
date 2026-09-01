@@ -46,7 +46,7 @@ import { WidgetCard } from "./WidgetCard";
 import { EmptyState } from "./states";
 import { SupplyMap } from "./SupplyMap";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
-import { forAggregate, forMonth, standouts, sumRevenue, weightedYoY } from "../stats";
+import { forAggregate, forMonth, scoreLabel, standouts, sumRevenue, weightedYoY } from "../stats";
 import { cellStyle, metricSpec } from "../scale";
 import {
   CLEARED,
@@ -57,22 +57,6 @@ import {
 import { SEGMENTS } from "../generated/segments";
 import type { AnalyticsRow, BucketCell, HeatmapMetric } from "../types";
 
-/**
- * A MAD-unit score in words. Deliberately not "significant" at any level.
- *
- * Thresholds are in PLAIN MAD units, matching what the card prints and what the
- * footnote's formula yields. They were 1/2/3 while the score carried the 1.4826
- * consistency constant; dropping the constant scales them by the same factor,
- * so the wording lands on exactly the same stages as before.
- */
-function band(score: number | null): string {
-  if (score === null) return "no spread to measure against";
-  const a = Math.abs(score);
-  if (a >= 4.45) return "far from the other stages";
-  if (a >= 2.97) return "clearly apart from the other stages";
-  if (a >= 1.48) return "somewhat apart";
-  return "in line with the other stages";
-}
 
 function Row({
   label,
@@ -135,13 +119,23 @@ function StandoutStage({
   const month = (cells ?? []).filter((c) => c.month === latestMonth && c.value !== null);
   const { ranked, median, mad, n } = standouts(month, (c) => c.value);
   const top = ranked[0];
+  // Every stage sharing the leader's ROUNDED score - rounded, because that is
+  // the number on screen, and two stages the reader sees as "+1.5 MAD" are
+  // tied as far as they can tell.
+  const tied =
+    top?.score == null
+      ? []
+      : ranked.filter(
+          (r) => r.score != null && Math.abs(r.score - top.score!) < 0.05,
+        );
 
   return (
     <WidgetCard
       title="Standout stage"
       subtitle={
         latestMonth
-          ? `${monthLabel(latestMonth)} · ${spec.label} vs the other stages that month`
+          ? `${monthLabel(latestMonth)} · ${spec.label} vs the other stages that month` +
+            ` · ordered by distance from the median, not by ${spec.label}`
           : "no month loaded"
       }
       staticCard
@@ -180,11 +174,29 @@ function StandoutStage({
             <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-hint)" }}>
               {top
                 ? `${spec.unit === "ppt" ? ppt(top.value) : pct(top.value)} · ` +
-                  (top.score === null
-                    ? band(null)
-                    : `${top.score > 0 ? "+" : ""}${top.score.toFixed(1)} MAD · ${band(top.score)}`)
+                  `${scoreLabel(top.score).text} · ${scoreLabel(top.score).words}`
                 : "—"}
             </div>
+            {/* A tie is not a winner. Two stages on the same rounded score are
+                equally unlike the others, and picking one by array order
+                presents an arbitrary choice as a finding. Naming the tie costs
+                a line and stops the reader acting on the wrong stage. */}
+            {tied.length > 1 && (
+              <div style={{ marginTop: 3, fontSize: 10.5, color: "var(--text-hint)" }}>
+                Tied at {scoreLabel(top?.score ?? null).text} with{" "}
+                {tied.slice(1).map((t) => t.item.bucket).join(", ")} — the pick between them
+                is arbitrary.
+              </div>
+            )}
+            {/* A one-member stage has no internal spread: its "stage
+                acceleration" IS that company's acceleration, scored here
+                against stages that average five filers. Not wrong, but not the
+                same kind of number, and the card should not pretend it is. */}
+            {top && top.item.members === 1 && (
+              <div style={{ marginTop: 3, fontSize: 10.5, color: "var(--text-hint)" }}>
+                One member only — this is a single company's move, not a stage average.
+              </div>
+            )}
           </div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <tbody>
@@ -193,8 +205,14 @@ function StandoutStage({
                   key={r.item.bucket}
                   label={r.item.bucket}
                   sub={
-                    (r.score === null ? "no score" : `${r.score > 0 ? "+" : ""}${r.score.toFixed(1)} MAD`) +
-                    ` · ${r.item.members_with_revenue} filed, ${r.item.members} comparable`
+                    // Ranked by |MAD|, but the eye follows the big metric
+                    // figure on the right, so the list read as unsorted: 71.7,
+                    // 71.7, 67.8, 22.6, 64.4... An explicit rank says which
+                    // number the order is actually on.
+                    `#${i + 1} · ` +
+                    `${scoreLabel(r.score).text}` +
+                    ` · ${r.item.members_with_revenue} filed, ${r.item.members} comparable` +
+                    (r.item.members === 1 ? " (single company)" : "")
                   }
                   value={r.value}
                   metric={metric}

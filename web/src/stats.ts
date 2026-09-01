@@ -316,3 +316,38 @@ export function standouts<T>(
     .sort((a, b) => Math.abs(b.score ?? 0) - Math.abs(a.score ?? 0));
   return { ranked, median: med, mad: spread, n: pairs.length };
 }
+
+/**
+ * A MAD-unit score, as ONE object carrying both the number and the words.
+ *
+ * They must come from the same rounding or they contradict each other on
+ * screen, which is exactly what shipped: the card printed the score to one
+ * decimal while the wording tested the unrounded value against 1.48. A true
+ * score of 1.46 therefore rendered as
+ *
+ *     "+1.5 MAD - in line with the other stages"
+ *
+ * under a heading that said MOST UNLIKE THE OTHERS - a number above the
+ * threshold, described as below it, beside a heading saying the opposite
+ * again. Every score in [1.45, 1.48) did this, and the reader has no way to
+ * see why.
+ *
+ * So the rounding happens once, here, and the bands are stated on the same
+ * grid the reader is shown. The cut points move by at most 0.03 MAD (they
+ * were 1/2/3 x the 1.4826 consistency constant, which the score no longer
+ * carries); no stage in the current data changes band, and in exchange the
+ * printed number and the printed words can never disagree again.
+ *
+ * Deliberately not "significant" at any level - see the card's own footnote.
+ */
+export function scoreLabel(score: number | null): { text: string; words: string } {
+  if (score === null) return { text: "no score", words: "no spread to measure against" };
+  const shown = Number(score.toFixed(1));
+  const a = Math.abs(shown);
+  const words =
+    a >= 4.5 ? "far from the other stages"
+    : a >= 3.0 ? "clearly apart from the other stages"
+    : a >= 1.5 ? "somewhat apart"
+    : "in line with the other stages";
+  return { text: `${shown > 0 ? "+" : ""}${shown.toFixed(1)} MAD`, words };
+}

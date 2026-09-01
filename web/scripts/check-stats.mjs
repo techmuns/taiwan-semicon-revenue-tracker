@@ -57,7 +57,7 @@ try {
 }
 
 const { median, medianOf, sumRevenue, weightedYoY, meanOf, mad, standouts,
-        forAggregate, movers, rebase, forMonth, groupBy, sortedMonths } = stats;
+        forAggregate, movers, rebase, forMonth, groupBy, sortedMonths, scoreLabel } = stats;
 
 let failures = 0;
 const ok = (name, cond, note = "") => {
@@ -207,6 +207,58 @@ ok("nulls do not become zeros", (() => {
   return a.value === 3 && a.n === 2 && a.missing === 1;
 })());
 ok("undefined is treated as absent", meanOf([2, undefined, 4]).n === 2);
+
+group("scoreLabel - the printed number and the printed words agree");
+// The shipped bug, exactly as it appeared on screen: a score of 1.46 printed
+// as "+1.5 MAD" while the wording tested 1.46 against a 1.48 threshold, so the
+// card read "+1.5 MAD - in line with the other stages" under a heading saying
+// MOST UNLIKE THE OTHERS. Every value in [1.45, 1.48) did it.
+ok("1.46 no longer prints a number above the cut with words from below it", (() => {
+  const a = scoreLabel(1.46);
+  return a.text === "+1.5 MAD" && a.words === "somewhat apart";
+})());
+ok("the whole old dead-zone is consistent", (() => {
+  // Not 1.45: (1.45).toFixed(1) is "1.4" in JavaScript, because 1.45 is held
+  // as slightly less than 1.45 in binary floating point. That is still
+  // CONSISTENT - "+1.4 MAD / in line" - which is the only property this
+  // module promises. The sweep below is what actually guarantees it; these
+  // are the named cases from the bug report.
+  for (const v of [1.451, 1.46, 1.47, 1.4799]) {
+    const a = scoreLabel(v);
+    if (a.text !== "+1.5 MAD" || a.words !== "somewhat apart") return false;
+  }
+  return true;
+})());
+ok("a value that ROUNDS below the cut stays 'in line'", (() => {
+  const a = scoreLabel(1.44);
+  return a.text === "+1.4 MAD" && a.words === "in line with the other stages";
+})());
+ok("negative scores band on magnitude, and keep their sign", (() => {
+  const a = scoreLabel(-3.2);
+  return a.text === "-3.2 MAD" && a.words === "clearly apart from the other stages";
+})());
+ok("null -> no number, no claim", (() => {
+  const a = scoreLabel(null);
+  return a.text === "no score" && a.words === "no spread to measure against";
+})());
+ok("every band boundary is expressible at the shown precision", (() => {
+  // If a cut point were not a multiple of 0.1 the contradiction returns.
+  return [1.5, 3.0, 4.5].every((c) => Math.abs(c * 10 - Math.round(c * 10)) < 1e-9);
+})());
+ok("words never disagree with the printed number, swept 0.00 -> 6.00", (() => {
+  for (let i = 0; i <= 600; i++) {
+    const v = i / 100;
+    const a = scoreLabel(v);
+    const shown = Math.abs(Number(a.text.replace(/[^0-9.\-]/g, "")));
+    const expect =
+      shown >= 4.5 ? "far from the other stages"
+      : shown >= 3.0 ? "clearly apart from the other stages"
+      : shown >= 1.5 ? "somewhat apart"
+      : "in line with the other stages";
+    if (a.words !== expect) return false;
+  }
+  return true;
+})(), "(601 values)");
 
 rmSync(out, { recursive: true, force: true });
 console.log(failures ? `\n${failures} FAILED` : "\nstats.ts OK - all assertions passed");
