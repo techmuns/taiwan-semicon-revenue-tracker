@@ -35,14 +35,21 @@ STATEMENT_RE = re.compile(
 
 
 def heatmap_sql(repo_root: Path, *, exclude: tuple[tuple[str, str], ...] = ()) -> str:
-    """The shipped statement, with its two interpolations resolved."""
-    src = (repo_root / "worker" / "src" / "api.ts").read_text(encoding="utf-8")
-    m = STATEMENT_RE.search(src)
-    assert m, (
-        "could not find the bucket-heatmap statement in worker/src/api.ts. It was "
-        "restructured - re-check the invariants in this file by hand before "
-        "adjusting STATEMENT_RE."
+    """The shipped statement, with its two interpolations resolved.
+
+    Read from ingest/src/twrev/sql/heatmap_bucket.sql, which is now the ONE
+    copy. It used to be scraped out of api.ts by STATEMENT_RE, and that regex
+    was the most fragile thing in this suite: a restructure of the TypeScript
+    would have silently orphaned the only executable test of the most
+    defect-prone code in the repository. A file cannot be orphaned that way.
+    (STATEMENT_RE survives only for test_file_and_worker_have_not_drifted,
+    which holds the two copies together until the Worker's is deleted.)
+    """
+    text = (repo_root / "ingest" / "src" / "twrev" / "sql" / "heatmap_bucket.sql").read_text(
+        encoding="utf-8"
     )
+    m = re.search(r"(WITH all_rows AS.*)", text, re.S)
+    assert m, "heatmap_bucket.sql does not contain the statement"
     pairs = (
         ",\n     pair(parent, child) AS (VALUES "
         + ", ".join(f"('{p}', '{c}')" for p, c in exclude)
@@ -61,6 +68,7 @@ def heatmap_sql(repo_root: Path, *, exclude: tuple[tuple[str, str], ...] = ()) -
     )
     return (
         m.group(1)
+        .rstrip("\n")
         .replace("${sql}", "b.month >= '2026-01'")
         .replace("${pairSql}", pairs)
         .replace("WHERE month >= ?", "WHERE month >= '2026-02'")
@@ -215,3 +223,25 @@ def test_child_is_kept_when_the_parent_has_not_filed(repo_root, conn):
         f"is - got {mar['revenue']}"
     )
     assert mar["members_yoy"] == 1, "and it is counted in the basis"
+
+
+def test_file_and_worker_have_not_drifted(repo_root):
+    """While BOTH copies exist, they must be identical, character for character.
+
+    Deleted in the same commit that removes the statement from api.ts - at that
+    point the .sql file is the only copy and there is nothing left to drift
+    against. Until then this is what stops the two diverging silently, which is
+    the exact failure the extraction was meant to make impossible.
+    """
+    src = (repo_root / "worker" / "src" / "api.ts").read_text(encoding="utf-8")
+    m = STATEMENT_RE.search(src)
+    if m is None:
+        pytest.skip("api.ts no longer carries the statement - the .sql file is the only copy")
+    text = (repo_root / "ingest" / "src" / "twrev" / "sql" / "heatmap_bucket.sql").read_text(
+        encoding="utf-8"
+    )
+    from_file = re.search(r"(WITH all_rows AS.*)", text, re.S).group(1).rstrip("\n")
+    assert from_file == m.group(1), (
+        "heatmap_bucket.sql and worker/src/api.ts have diverged. They are the same "
+        "statement; edit one and copy it, or delete the Worker's."
+    )

@@ -23,10 +23,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
+from . import roc
 from .config import Sources, Universe
 
 # The window the dashboard opens on, vs everything queryable. Mirrors
@@ -273,3 +275,169 @@ def write_all(
     (out_dir / "export.csv").write_text(csv_text, encoding="utf-8", newline="")
     written["export.csv"] = len(csv_text.encode("utf-8"))
     return written
+
+
+# ------------------------------------------------------------------ heatmap --
+#
+# The one endpoint that could not be a file - until it was measured.
+#
+# /api/heatmap aggregates 37 companies into 10 stage rows over whatever filters
+# are live, so the received wisdom was that its answers cannot be enumerated:
+# ticker selection is an arbitrary subset of 37, which is 2^37 of them.
+#
+# Two measurements collapse that.
+#
+# FIRST, there is no ticker control in the user interface. `tickers` reaches the
+# filter state only through web/src/urlState.ts:71 - a hand-edited or shared
+# link. Nothing a reader can click produces one.
+#
+# SECOND, and verified by executing the real statement rather than by reading
+# it: `from`, `to` and `buckets` DO NOT CHANGE A CELL'S VALUE. `per_bucket`
+# groups by (bucket, month_idx) and the window always reaches one month behind
+# `from`, so those parameters select which cells come back, never what is in
+# them. Run against a store of 11 companies over 6 months, a narrower `to`, a
+# wider `from` and a single-bucket filter each returned values identical to the
+# unfiltered run across every shared cell and all six computed columns - 0
+# divergences. `only_with_data` adds `revenue_month IS NOT NULL`, which every
+# members_* predicate already implies.
+#
+# So the reachable space is the FOUR tier subsets. This runs the statement -
+# THE statement, from heatmap_bucket.sql, the same characters that ran on D1 -
+# four times at publish time, and precomputes every metric x aggregation
+# combination the client can ask for. The browser then does no arithmetic at
+# all: it indexes by tier subset, metric and aggregation, and filters the cells
+# by bucket and month, which is exactly what the SQL proved those parameters do.
+#
+# A hand-written ?tickers= link is the one thing this cannot answer. It is
+# reported rather than silently approximated - see `ticker_filter_unsupported`.
+
+TIER_SUBSETS: tuple[tuple[int, ...], ...] = ((), (1,), (2,), (1, 2))
+METRICS = ("yoy_acceleration_ppt", "yoy_pct", "mom_pct", "cumulative_yoy_pct")
+AGGS = ("weighted", "equal")
+
+
+def _heatmap_statement() -> str:
+    """The statement, from the one file that holds it."""
+    path = Path(__file__).resolve().parent / "sql" / "heatmap_bucket.sql"
+    text = path.read_text(encoding="utf-8")
+    return re.search(r"(WITH all_rows AS.*)", text, re.S).group(1).rstrip("\n")
+
+
+def _pair_sql(consolidation: Sequence[tuple[str, str]]) -> tuple[str, list[str]]:
+    """api.ts's `pairSql`, character for character, including the CONDITIONAL
+    exclusion - the child is dropped only when the parent has itself filed that
+    month, because otherwise no row anywhere carries the child's revenue and
+    removing it understates the stage by exactly that revenue."""
+    if not consolidation:
+        return ",\n     scoped AS (SELECT * FROM all_rows)", []
+    values = ", ".join("(?, ?)" for _ in consolidation)
+    sql = (
+        ",\n     pair(parent, child) AS (VALUES "
+        + values
+        + """),
+     scoped AS (
+       SELECT a.* FROM all_rows a
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pair p
+            JOIN all_rows x ON x.ticker = p.parent
+                           AND x.month_idx = a.month_idx
+                           AND x.revenue_month IS NOT NULL
+           WHERE p.child = a.ticker)
+     )"""
+    )
+    return sql, [t for pair in consolidation for t in pair]
+
+
+def _pick(row: dict[str, Any], metric: str, applied: str) -> Any:
+    """api.ts's `pick`. Field selection only - no arithmetic happens here."""
+    suffix = "equal" if applied == "equal" else "weighted"
+    if metric == "yoy_acceleration_ppt":
+        return row.get(f"acceleration_{suffix}")
+    if metric == "yoy_pct":
+        return row.get(f"yoy_{suffix}")
+    if metric == "mom_pct":
+        return row.get(f"mom_{suffix}")
+    if metric == "cumulative_yoy_pct":
+        # No equal-weighted variant: averaging YTD percentages across members
+        # with different fiscal shapes is not a number that means anything.
+        return row.get("cum_yoy_weighted")
+    return None
+
+
+def _members_for(row: dict[str, Any], metric: str, applied: str) -> Any:
+    """api.ts's `membersFor`. The basis must describe the set THIS aggregation
+    covered, not the set the other one would have. MoM's two sets are the only
+    ones that differ."""
+    if metric == "mom_pct":
+        return row["members_mom_equal"] if applied == "equal" else row["members_mom"]
+    if metric == "cumulative_yoy_pct":
+        return row["members_cum"]
+    return row["members_yoy"]
+
+
+def build_heatmap(
+    conn: sqlite3.Connection,
+    consolidation: Sequence[tuple[str, str]],
+    *,
+    from_month: str,
+) -> dict[str, Any]:
+    """Every heatmap answer a reader can reach, computed by the shipped SQL."""
+    statement = _heatmap_statement()
+    pair_sql, pair_binds = _pair_sql(consolidation)
+    # api.ts:484 - whereFor({...f, from: addMonths(f.from, -1)}). The CTE must
+    # see one month BEFORE the window or January has no prior month to
+    # difference against and every acceleration in it comes back null. That is
+    # what the Dec-2025 shoulder month exists for. The final `WHERE month >= ?`
+    # then trims the shoulder back off, so it is used and never shown.
+    shoulder = roc.add_months(from_month, -1)
+
+    out: dict[str, Any] = {
+        "generated_from": "ingest/src/twrev/sql/heatmap_bucket.sql",
+        "from": from_month,
+        "tier_subsets": {},
+        "ticker_filter_unsupported": (
+            "A ?tickers= filter changes a stage aggregate and cannot be enumerated. "
+            "There is no control that produces one; a hand-written link must be "
+            "reported to the reader, never silently answered with the unfiltered value."
+        ),
+    }
+
+    for tiers in TIER_SUBSETS:
+        where = "b.month >= ?"
+        binds: list[Any] = [shoulder]
+        if tiers:
+            where += f" AND b.tier IN ({', '.join('?' for _ in tiers)})"
+            binds += list(tiers)
+        sql = statement.replace("${sql}", where).replace("${pairSql}", pair_sql)
+        # Bind order follows the statement: the all_rows filter, then the pair
+        # VALUES, then the final `WHERE month >= ?`.
+        rows = _rows(conn, sql, *binds, *pair_binds, from_month)
+
+        combos: dict[str, Any] = {}
+        for metric in METRICS:
+            for agg in AGGS:
+                applied = "weighted" if metric == "cumulative_yoy_pct" else agg
+                combos[f"{metric}|{agg}"] = {
+                    "metric": metric,
+                    "agg": applied,
+                    "agg_requested": agg,
+                    "cells": [
+                        {
+                            "bucket": r["bucket"],
+                            "month": r["month"],
+                            "value": _pick(r, metric, applied),
+                            "members": _members_for(r, metric, applied),
+                            "members_with_revenue": r["members"],
+                            "composition_changed": (
+                                metric == "yoy_acceleration_ppt"
+                                and r.get("members_churned") is not None
+                                and r["members_churned"] > 0
+                            ),
+                            "revenue": r["revenue"],
+                        }
+                        for r in rows
+                    ],
+                }
+        out["tier_subsets"]["" if not tiers else ",".join(str(t) for t in tiers)] = combos
+
+    return out
