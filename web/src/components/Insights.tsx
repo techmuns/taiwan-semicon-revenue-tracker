@@ -603,7 +603,7 @@ function Relationships() {
             disclosure produces confident-looking alerts founded on a guess -
             which on a page whose whole claim is that every figure states its
             basis is worse than no alerts at all. The card below says what it
-            would take to have them for real.
+            would take to have them for real: buying the data.
           */}
           <div
             style={{
@@ -627,58 +627,22 @@ function Relationships() {
 }
 
 /**
- * Supplier -> customer mapping: what it would take, and why it is not here.
+ * Where a supplier -> customer map would go.
  *
- * This card replaces a hand-built map of 18 supplier->customer edges. That map
- * was removed rather than improved, because the problem with it was not
- * coverage - it was PROVENANCE. Most of its edges carried the evidence line
- * "inferred from stage structure; not itemised in a disclosure", which is an
- * honest label on a guess. Sat beside real filed revenue, in the same card
- * style, a guess reads as a fact. The card said "a prompt, not a finding" and
- * that did not fix it.
+ * A hand-built map of 18 edges used to sit here. It was removed because most of
+ * its edges carried the evidence line "inferred from stage structure; not
+ * itemised in a disclosure" - an honest label on a guess, and a guess rendered
+ * beside filed revenue reads as a fact.
  *
- * The gap is in the SOURCE, not in the effort. It cannot be closed by scraping
- * harder, so the card now says what would actually close it.
+ * The gap is in the SOURCE. Taiwan's monthly filing names no counterparty, and
+ * the annual reports anonymise it ("Customer A - 60.16%"), so no amount of
+ * scraping closes this. One line, because one line is the whole answer.
  */
 function SupplyDataGap() {
   return (
-    <WidgetCard
-      title="Supplier and customer mapping"
-      subtitle="Not built - the relationships are not in any free filing"
-      full
-      staticCard
-      fit
-      footnote={
-        "Removed rather than kept behind a caveat: an inferred edge shown beside filed " +
-        "revenue reads as a fact. No number anywhere on this dashboard was ever computed " +
-        "from those links, so nothing else changed when they went."
-      }
-    >
-      <div style={{ padding: "12px 14px", fontSize: 12.5, lineHeight: 1.65, maxWidth: 780 }}>
-        <p style={{ margin: "0 0 10px" }}>
-          Taiwan's monthly disclosure is <strong>one consolidated revenue figure</strong> per
-          company, plus the comparison periods and a free-text note. It names no customer, no
-          supplier and no product line.
-        </p>
-        <p style={{ margin: "0 0 10px" }}>
-          The annual reports do not close the gap either, because they{" "}
-          <strong>anonymise the counterparty</strong>. Alchip's largest customer is disclosed
-          as &ldquo;Customer A &mdash; 60.16%&rdquo;; Quanta's as 31.27%; Asia Vital
-          Components' as 28.61%. The concentration is public. The identity is not.
-        </p>
-        <p style={{ margin: "0 0 10px" }}>
-          So a real map has to be bought. The commercial datasets that carry named
-          supplier&ndash;customer relationships are <strong>Bloomberg SPLC</strong>,{" "}
-          <strong>FactSet Revere</strong>, <strong>S&amp;P Capital IQ</strong> and{" "}
-          <strong>LSEG</strong>. Before licensing one, check its coverage of Taiwanese small
-          and mid caps specifically &mdash; that is this universe, and it is where
-          relationship datasets are thinnest.
-        </p>
-        <p style={{ margin: 0, color: "var(--text-muted)" }}>
-          Until then the honest substitute is already on this page: companies in the same
-          stage face the same demand, so the stage comparison above answers &ldquo;who moved
-          and who did not&rdquo; without asserting a link that no filing states.
-        </p>
+    <WidgetCard title="Supplier and customer mapping" full staticCard fit>
+      <div style={{ padding: "14px", fontSize: 13, color: "var(--text-muted)" }}>
+        Paid data required.
       </div>
     </WidgetCard>
   );
