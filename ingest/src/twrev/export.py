@@ -137,13 +137,21 @@ def build_meta(conn: sqlite3.Connection, universe: Universe, sources: Sources) -
                 " ORDER BY u.sort_order",
             ),
         },
-        # Static files have no gate to describe, and the dashboard stopped
-        # displaying this before the migration. Kept so the shape does not
-        # change under the frontend's Meta type.
+        # A BUILD-TIME DEFAULT, NOT THE LIVE POSTURE - and nothing may read it
+        # as one. This runs on a GitHub runner with no sight of the Worker's
+        # secrets, so it cannot tell whether DASHBOARD_KEY is set; it would say
+        # "open" for a fully gated deployment. The published files DO sit behind
+        # the gate (`run_worker_first = ["/data/*"]`), so "no API to gate" was
+        # wrong as well as unknowable.
+        #
+        # The live posture is on /api/health, which the Worker answers from
+        # `accessMode(env)` and serves without a credential. App.tsx reads it
+        # from there. This block is kept only so the shape does not change under
+        # the frontend's Meta type.
         "access": {
             "mode": "open",
             "public": True,
-            "note": "static export; served as files, no API to gate",
+            "note": "build-time default; the live posture is on /api/health",
         },
         "units": {
             "revenue": "TWD thousands",

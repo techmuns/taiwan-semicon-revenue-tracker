@@ -20,7 +20,7 @@
 import { Segmented, TickerPill } from "./controls";
 import { freshnessLabel } from "../format";
 import { useTheme } from "../theme";
-import type { Meta } from "../types";
+import type { AccessPosture, Meta } from "../types";
 
 /**
  * The theme switch.
@@ -100,6 +100,7 @@ export function Header({
   onClearTicker,
   exportHref,
   onLock,
+  accessMode,
   now,
 }: {
   tab: Tab;
@@ -109,6 +110,15 @@ export function Header({
   onClearTicker: () => void;
   exportHref: string;
   onLock: () => void;
+  /**
+   * The live posture from /api/health, or null while it is in flight.
+   *
+   * NOT `meta.access.mode`: that is written by the exporter, which runs where
+   * the Worker's secrets are not visible and therefore always says "open". Read
+   * from there, the Lock button would vanish the moment DASHBOARD_KEY was set -
+   * leaving a gated dashboard with no way to clear its session cookie.
+   */
+  accessMode: AccessPosture["mode"] | null;
   now: number;
 }) {
   const company = ticker
@@ -191,7 +201,7 @@ export function Header({
             stamp and the export button on every screen.
             The Method and units card carried it for a while afterwards and has
             since dropped it too, for the same reason. The posture is not lost:
-            /api/meta still reports it and the runbook documents it, which is
+            /api/health reports it live and the runbook documents it, which is
             where the person who can actually change it is looking. */}
         {meta?.latest_month && (
           <span
@@ -222,7 +232,7 @@ export function Header({
         >
           Export CSV
         </a>
-        {meta?.access?.mode === "secret" && (
+        {accessMode === "secret" && (
           <button
             type="button"
             onClick={onLock}

@@ -2,10 +2,11 @@
  * The unlock screen, shown when the API answers 401.
  *
  * The Worker derives its access posture from which secrets are set
- * (worker/src/access.ts). Once `DASHBOARD_KEY` exists, every `/api/*` route needs
- * a credential - so without this screen the dashboard renders six identical
- * "unauthorized" cards and offers no way to fix any of them, which is what a
- * missing login looks like from the outside.
+ * (worker/src/access.ts). Once `DASHBOARD_KEY` exists, every `/data/*` file needs
+ * a credential - the published data is routed through the Worker precisely so
+ * the gate applies to it - so without this screen the dashboard renders six
+ * identical "unauthorized" cards and offers no way to fix any of them, which is
+ * what a missing login looks like from the outside.
  *
  * Three deliberate choices:
  *

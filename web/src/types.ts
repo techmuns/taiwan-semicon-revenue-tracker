@@ -111,13 +111,25 @@ export interface Meta {
 export interface Health {
   ok: boolean;
   service: string;
-  d1?: {
-    bound: boolean;
-    universe_n?: number;
-    raw_n?: number;
-    latest_month?: string | null;
-    error?: string;
+  /**
+   * The LIVE access posture, evaluated by the Worker from its own secrets.
+   *
+   * `Meta.access` cannot be trusted for this: it is written by an exporter on a
+   * GitHub runner, which cannot see those secrets, so it is frozen at "open".
+   * This field is the one that reflects reality, and it is present on the
+   * failure branches too - a broken publish must not also hide whether the
+   * dashboard is gated.
+   */
+  access?: AccessPosture;
+  /** Absent on the 503 branches, which carry `error` instead. */
+  data?: {
+    source: string;
+    universe_n: number;
+    months: number;
+    latest_month?: string;
+    generated_at_utc: string | null;
   };
+  error?: string;
   hint?: string;
 }
 

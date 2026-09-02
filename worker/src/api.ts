@@ -24,6 +24,8 @@
  * replacement, which is what an old bookmark or a stale cached bundle needs.
  */
 
+import { accessPosture } from "./access";
+
 export interface Env {
   ASSETS?: Fetcher;
   DASHBOARD_KEY?: string;
@@ -63,25 +65,36 @@ function retiredFor(path: string): string | undefined {
 /**
  * Liveness, read from the same bytes a reader gets.
  *
- * Deliberately NOT computed from anything this Worker holds in memory: the
- * failure it exists to catch is a publish that did not happen or landed empty,
- * and only reading the artefact can see that.
+ * The DATA half is deliberately NOT computed from anything this Worker holds in
+ * memory: the failure it exists to catch is a publish that did not happen or
+ * landed empty, and only reading the artefact can see that.
+ *
+ * The ACCESS half is the opposite, and must be. `meta.json` carries an `access`
+ * block too, but the exporter runs on a GitHub runner that cannot see this
+ * Worker's secrets, so that block is a build-time default frozen at "open" -
+ * and the UI hides the Lock button when it reads "open", which would leave a
+ * gated dashboard with no way to clear a session cookie. So the posture is
+ * reported HERE, where `accessMode(env)` can actually be evaluated, on the one
+ * route that answers without a credential.
  */
 async function health(env: Env): Promise<Response> {
   const service = "taiwan-semicon-revenue-tracker";
+  // On every branch below, including the failures: a broken publish must not
+  // also hide whether the dashboard is gated.
+  const access = accessPosture(env);
   if (!env.ASSETS) {
-    return json({ ok: false, service, error: "no assets binding" }, 503);
+    return json({ ok: false, service, access, error: "no assets binding" }, 503);
   }
   let meta: { months?: string[]; universe?: unknown[]; generated_at_utc?: string };
   try {
     const resp = await env.ASSETS.fetch(new Request("https://assets.local/data/meta.json"));
     if (!resp.ok) {
-      return json({ ok: false, service, error: `meta.json: HTTP ${resp.status}` }, 503);
+      return json({ ok: false, service, access, error: `meta.json: HTTP ${resp.status}` }, 503);
     }
     meta = await resp.json();
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    return json({ ok: false, service, error: `meta.json unreadable: ${detail}` }, 503);
+    return json({ ok: false, service, access, error: `meta.json unreadable: ${detail}` }, 503);
   }
 
   const months = Array.isArray(meta.months) ? meta.months : [];
@@ -90,14 +103,15 @@ async function health(env: Env): Promise<Response> {
   // reason the endpoint reads the file rather than reporting its own uptime.
   if (!months.length || !universe.length) {
     return json(
-      { ok: false, service, error: "published data is empty", months: months.length,
-        universe_n: universe.length },
+      { ok: false, service, access, error: "published data is empty",
+        months: months.length, universe_n: universe.length },
       503,
     );
   }
   return json({
     ok: true,
     service,
+    access,
     data: {
       source: "/data/meta.json",
       universe_n: universe.length,

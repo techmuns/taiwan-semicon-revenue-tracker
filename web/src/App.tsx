@@ -136,6 +136,13 @@ export default function App() {
 
   const meta = useApi(() => api.meta(), []);
 
+  // The live access posture, and the only source for it. `meta.access` is
+  // written by the exporter on a GitHub runner, which cannot see this Worker's
+  // secrets, so it always reads "open"; only the Worker can answer this. Health
+  // is the one route that answers without a credential, which is exactly what a
+  // browser that does not yet hold one needs.
+  const health = useApi(() => api.health(), []);
+
   // The server owns the default window (it excludes the shoulder month). Adopt it
   // once, and only when the URL did not already say otherwise.
   const adopted = useRef(false);
@@ -198,6 +205,7 @@ export default function App() {
         ticker={view.ticker}
         onClearTicker={() => setView((v) => ({ ...v, ticker: null }))}
         exportHref={exportHref}
+        accessMode={health.data?.access?.mode ?? null}
         onLock={() => {
           void api.logout().then(() => setLocked(true));
         }}
