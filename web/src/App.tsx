@@ -693,11 +693,6 @@ function InsightsTab({
               bucketCells={d.cells}
               latestMonth={latestMonth}
               metric={metric}
-              stageOrder={stageOrder(meta)}
-              universe={(meta?.universe ?? []).map((c) => ({
-                ticker: c.ticker,
-                name: c.display_name,
-              }))}
               onSelect={onSelect}
             />
             {meta && <MethodAndUnits meta={meta} />}

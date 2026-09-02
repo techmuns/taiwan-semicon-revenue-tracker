@@ -38,22 +38,19 @@
  *                    cleared - shown together because the intuitive "big stake
  *                    means consolidated" rule is wrong and the counter-examples
  *                    belong next to the case where it happens to hold.
- *   Supply links     who sells into whom, and how far apart the two ends moved
- *                    this month. A prompt to go and look, never a finding.
+ *   Supply data gap  where a supplier -> customer map would go, and why there is
+ *                    not one. A hand-built map of 18 edges used to sit here; it
+ *                    was removed because most of its edges were inferred from
+ *                    stage structure rather than disclosed, and no caveat makes
+ *                    a guess safe to render beside filed revenue.
  */
 
 import { WidgetCard } from "./WidgetCard";
 import { EmptyState } from "./states";
-import { SupplyMap } from "./SupplyMap";
 import { NA, monthLabel, pct, ppt, revenue } from "../format";
 import { forAggregate, forMonth, scoreLabel, standouts, sumRevenue, weightedYoY } from "../stats";
 import { cellStyle, metricSpec } from "../scale";
-import {
-  CLEARED,
-  CONSOLIDATION,
-  SUPPLIES,
-  consolidationNote,
-} from "../generated/relationships";
+import { CLEARED, CONSOLIDATION, consolidationNote } from "../generated/relationships";
 import { SEGMENTS } from "../generated/segments";
 import type { AnalyticsRow, BucketCell, HeatmapMetric } from "../types";
 
@@ -596,13 +593,17 @@ function Relationships() {
             </div>
           )}
           {/*
-            The supplier / competitor graph is NOT here, and its absence is the
-            deliberate part. Those edges drive "a related company moved sharply,
-            check this one" flags, and an edge asserted from memory would produce
-            confident-looking alerts founded on a guess - which on a page whose
-            whole claim is that every figure states its basis is worse than no
-            alerts at all. config/relationships.yaml has the two lists, empty,
-            with the shape an entry must take.
+            This card is ONLY about consolidation - which company's revenue is
+            already inside another's, and therefore must not be added twice. It
+            is the one relationship on this dashboard that changes a number.
+
+            The supplier / competitor graph is a different thing and is not here.
+            Those edges would drive "a related company moved sharply, check this
+            one" flags, and an edge asserted from stage structure rather than a
+            disclosure produces confident-looking alerts founded on a guess -
+            which on a page whose whole claim is that every figure states its
+            basis is worse than no alerts at all. The card below says what it
+            would take to have them for real.
           */}
           <div
             style={{
@@ -616,7 +617,8 @@ function Relationships() {
             Competitors are not listed separately: every competitor pair is two companies
             in the same stage, which <code>config/universe.yaml</code> already records and
             every screen already shows. A second copy of that fact could only drift from
-            the first. Supplier links are in the next card.
+            the first. Supplier and customer links are a different problem &mdash; see the
+            card below.
           </div>
         </>
       )}
@@ -625,174 +627,58 @@ function Relationships() {
 }
 
 /**
- * Who sells into whom, and whether the two ends moved together this month.
+ * Supplier -> customer mapping: what it would take, and why it is not here.
  *
- * THIS IS A PROMPT, NOT A FINDING. A supplier accelerating while its customer
- * decelerates is worth a look; it is not evidence of anything. Two linked
- * companies may diverge because of inventory, mix, a third customer, or a
- * timing difference in when each recognises revenue - and two companies that
- * move together may share a cycle rather than a relationship. Nothing on this
- * dashboard is computed from an edge; no total, no growth rate, no ranking.
+ * This card replaces a hand-built map of 18 supplier->customer edges. That map
+ * was removed rather than improved, because the problem with it was not
+ * coverage - it was PROVENANCE. Most of its edges carried the evidence line
+ * "inferred from stage structure; not itemised in a disclosure", which is an
+ * honest label on a guess. Sat beside real filed revenue, in the same card
+ * style, a guess reads as a fact. The card said "a prompt, not a finding" and
+ * that did not fix it.
  *
- * `confidence` is rendered on every row because the rows are not the same kind
- * of claim. `named` means a source names the buyer - Auras' own customer list,
- * ASE's 20-F. `stage` means the supplier's position is documented and the buyer
- * is one of the assemblers that stage sells into, but no disclosure pairs the
- * two. Hiding that distinction behind one word would make the weaker rows read
- * as strong as the stronger ones.
+ * The gap is in the SOURCE, not in the effort. It cannot be closed by scraping
+ * harder, so the card now says what would actually close it.
  */
-function SupplyLinks({
-  rows,
-  latestMonth,
-  onSelect,
-}: {
-  rows: AnalyticsRow[];
-  latestMonth: string | null;
-  onSelect: (ticker: string) => void;
-}) {
-  const byTicker = new Map(forMonth(rows, latestMonth).map((r) => [r.ticker, r]));
-  const links = SUPPLIES.map((e) => {
-    const from = byTicker.get(e.from)?.yoy_acceleration_ppt ?? null;
-    const to = byTicker.get(e.to)?.yoy_acceleration_ppt ?? null;
-    // "Diverging" needs BOTH ends present and both meaningfully outside the
-    // neutral band, or a company that simply has not filed reads as a signal.
-    // 2 ppt is the same neutral window the heatmap's band 0 uses.
-    const diverging =
-      from !== null && to !== null && Math.abs(from) >= 2 && Math.abs(to) >= 2 &&
-      Math.sign(from) !== Math.sign(to);
-    // The GAP, not a badge. On the month this was built, 12 of 18 pairs moved in
-    // opposite directions - a flag that fires on two thirds of the rows is not a
-    // flag, it is the weather. The size of the gap is a continuous quantity the
-    // reader can judge for themselves, and it is what ranks the list.
-    const gap = from !== null && to !== null ? Math.abs(from - to) : null;
-    return { ...e, fromAccel: from, toAccel: to, diverging, gap };
-  }).sort((a, b) => (b.gap ?? -1) - (a.gap ?? -1));
-
-  const flagged = links.filter((l) => l.diverging).length;
-  const measurable = links.filter((l) => l.gap !== null).length;
-
+function SupplyDataGap() {
   return (
     <WidgetCard
-      title="Supply links"
-      subtitle={
-        `${SUPPLIES.length} links between tracked companies` +
-        (latestMonth ? ` · both ends' acceleration in ${monthLabel(latestMonth)}` : "")
-      }
+      title="Supplier and customer mapping"
+      subtitle="Not built - the relationships are not in any free filing"
       full
       staticCard
+      fit
       footnote={
-        `A PROMPT, NOT A FINDING. ${flagged} of ${measurable} linked pairs moved in ` +
-        `OPPOSITE directions this month, so divergence is the normal state here rather ` +
-        `than an exception — read the SIZE of the gap, not its sign. A gap can open for ` +
-        `inventory, mix, a third customer or a timing difference in revenue recognition, ` +
-        `and two companies that move together may simply share a cycle. No number ` +
-        `anywhere on this dashboard is computed from these links.`
+        "Removed rather than kept behind a caveat: an inferred edge shown beside filed " +
+        "revenue reads as a fact. No number anywhere on this dashboard was ever computed " +
+        "from those links, so nothing else changed when they went."
       }
     >
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border)" }}>
-              {["Supplier", "sells into", "Basis", "Supplier accel", "Customer accel", "Gap"].map(
-                (h, i) => (
-                  <th
-                    key={h || i}
-                    className="eyebrow"
-                    style={{
-                      padding: "6px 8px",
-                      textAlign: i >= 3 ? "right" : "left",
-                      color: "var(--text-hint)",
-                      fontWeight: 500,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {h}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {links.map((l) => (
-              <tr
-                key={`${l.from}-${l.to}`}
-                style={{ borderBottom: "1px solid var(--border)" }}
-                title={l.evidence}
-              >
-                <td
-                  onClick={() => onSelect(l.from)}
-                  style={{ padding: "4px 8px 4px 14px", cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  {l.fromName}
-                  <span style={{ color: "var(--text-hint)" }}> {l.from}</span>
-                </td>
-                <td
-                  onClick={() => onSelect(l.to)}
-                  style={{ padding: "4px 8px", cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  {l.toName}
-                  <span style={{ color: "var(--text-hint)" }}> {l.to}</span>
-                </td>
-                <td
-                  style={{ padding: "4px 8px", fontSize: 10.5, color: "var(--text-hint)" }}
-                  title={
-                    l.confidence === "high"
-                      ? "A source names the buyer"
-                      : "Inferred from stage structure; no disclosure pairs the two by name"
-                  }
-                >
-                  {l.confidence === "high" ? "named in a source" : "inferred from stage"}
-                </td>
-                <td
-                  className="tnum"
-                  style={{
-                    ...cellStyle(l.fromAccel, "yoy_acceleration_ppt"),
-                    padding: "4px 8px",
-                    textAlign: "right",
-                    whiteSpace: "nowrap",
-                    width: 92,
-                  }}
-                >
-                  {ppt(l.fromAccel)}
-                </td>
-                <td
-                  className="tnum"
-                  style={{
-                    ...cellStyle(l.toAccel, "yoy_acceleration_ppt"),
-                    padding: "4px 8px",
-                    textAlign: "right",
-                    whiteSpace: "nowrap",
-                    width: 92,
-                  }}
-                >
-                  {ppt(l.toAccel)}
-                </td>
-                <td
-                  className="tnum"
-                  style={{
-                    padding: "4px 14px 4px 8px",
-                    textAlign: "right",
-                    fontSize: 11,
-                    width: 96,
-                    whiteSpace: "nowrap",
-                    // Weight is the only emphasis. A colour here would compete
-                    // with the two acceleration cells, which are already the
-                    // divergent-scale hues this gap is derived from.
-                    fontWeight: l.diverging ? 600 : 400,
-                    color: l.diverging ? "var(--text-primary)" : "var(--text-hint)",
-                  }}
-                  title={
-                    l.diverging
-                      ? "The two ends moved in opposite directions"
-                      : "The two ends moved the same way"
-                  }
-                >
-                  {l.gap === null ? NA : `${l.gap.toFixed(1)} ppt`}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ padding: "12px 14px", fontSize: 12.5, lineHeight: 1.65, maxWidth: 780 }}>
+        <p style={{ margin: "0 0 10px" }}>
+          Taiwan's monthly disclosure is <strong>one consolidated revenue figure</strong> per
+          company, plus the comparison periods and a free-text note. It names no customer, no
+          supplier and no product line.
+        </p>
+        <p style={{ margin: "0 0 10px" }}>
+          The annual reports do not close the gap either, because they{" "}
+          <strong>anonymise the counterparty</strong>. Alchip's largest customer is disclosed
+          as &ldquo;Customer A &mdash; 60.16%&rdquo;; Quanta's as 31.27%; Asia Vital
+          Components' as 28.61%. The concentration is public. The identity is not.
+        </p>
+        <p style={{ margin: "0 0 10px" }}>
+          So a real map has to be bought. The commercial datasets that carry named
+          supplier&ndash;customer relationships are <strong>Bloomberg SPLC</strong>,{" "}
+          <strong>FactSet Revere</strong>, <strong>S&amp;P Capital IQ</strong> and{" "}
+          <strong>LSEG</strong>. Before licensing one, check its coverage of Taiwanese small
+          and mid caps specifically &mdash; that is this universe, and it is where
+          relationship datasets are thinnest.
+        </p>
+        <p style={{ margin: 0, color: "var(--text-muted)" }}>
+          Until then the honest substitute is already on this page: companies in the same
+          stage face the same demand, so the stage comparison above answers &ldquo;who moved
+          and who did not&rdquo; without asserting a link that no filing states.
+        </p>
       </div>
     </WidgetCard>
   );
@@ -803,25 +689,17 @@ export function Insights({
   bucketCells,
   latestMonth,
   metric,
-  stageOrder,
-  universe,
   onSelect,
 }: {
   rows: AnalyticsRow[];
   bucketCells: BucketCell[] | null;
   latestMonth: string | null;
   metric: HeatmapMetric;
-  /** Stages in supply-chain order, so the map's columns read like the chain. */
-  stageOrder: string[];
-  /** Every tracked company - the map counts the ones with no link, honestly. */
-  universe: { ticker: string; name: string }[];
   onSelect: (ticker: string) => void;
 }) {
   const month = (bucketCells ?? []).filter((c) => c.month === latestMonth && c.value !== null);
   const { ranked } = standouts(month, (c) => c.value);
   const standoutBucket = ranked[0]?.item.bucket ?? null;
-  const supplierCount = new Set(SUPPLIES.map((e) => e.from)).size;
-  const buyerCount = new Set(SUPPLIES.map((e) => e.to)).size;
 
   return (
     <>
@@ -834,41 +712,7 @@ export function Insights({
       />
       <SegmentPilot rows={rows} latestMonth={latestMonth} onSelect={onSelect} />
       <Relationships />
-      {/* The map answers shape, the table answers per-pair detail. Map first:
-          "is this stage a source or a sink" is the question you have before you
-          have one about a specific row. */}
-      <WidgetCard
-        title="Supply map"
-        subtitle={
-          `${SUPPLIES.length} recorded links · fill is ${
-            latestMonth ? monthLabel(latestMonth) : "the latest month"
-          }'s YoY acceleration · click a company to open it`
-        }
-        full
-        staticCard
-        bodyStyle={{ overflow: "hidden" }}
-        // Counted, not typed. "eight suppliers into six buyers" sat hardcoded
-        // directly beneath a subtitle and an aria-label computing the same two
-        // quantities, so one new edge would have left the sentence under the
-        // chart contradicting the sentence above it.
-        footnote={
-          `EVERY RECORDED LINK IS ONE HOP — ${supplierCount} suppliers into ${buyerCount} ` +
-          `buyers, and nothing sells into a supplier — which is why this is two columns ` +
-          `and not a ten-stage cascade. Node size is deliberately NOT revenue: on an ` +
-          `honest scale the small names would vanish beside TSMC, and a thick link would ` +
-          `read as a large flow, which no filing states. A link is a prompt to look, ` +
-          `never a cause.`
-        }
-      >
-        <SupplyMap
-          rows={rows}
-          latestMonth={latestMonth}
-          stageOrder={stageOrder}
-          universe={universe}
-          onSelect={onSelect}
-        />
-      </WidgetCard>
-      <SupplyLinks rows={rows} latestMonth={latestMonth} onSelect={onSelect} />
+      <SupplyDataGap />
     </>
   );
 }
