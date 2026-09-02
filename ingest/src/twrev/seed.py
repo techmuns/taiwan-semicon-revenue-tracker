@@ -2,7 +2,7 @@
 
 Applied with:
 
-    npx wrangler d1 execute taiwan-semicon-revenue --remote --file=ingest/out/seed.sql
+    sqlite3 data/pipeline.sqlite < ingest/out/seed.sql
 
 Three properties the generated file must have, in order of importance:
 

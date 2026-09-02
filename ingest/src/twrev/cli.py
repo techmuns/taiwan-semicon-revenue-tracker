@@ -256,9 +256,8 @@ def cmd_seed(args: argparse.Namespace) -> int:
         rel = out.relative_to(repo_root())
     except ValueError:
         rel = out
-    print("  apply with (from worker/):")
-    print(f"    npx wrangler d1 execute taiwan-semicon-revenue --remote "
-          f"--file=../{rel.as_posix()}")
+    print("  apply with:")
+    print(f"    sqlite3 data/pipeline.sqlite < {rel.as_posix()}")
     return 0
 
 

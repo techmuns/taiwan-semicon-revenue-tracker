@@ -3,7 +3,7 @@
 Both paths must issue byte-identical statements, otherwise the local test proves
 nothing about what D1 will do. So the statements are built here once: `store.py`
 executes them against local SQLite with bound parameters, and `seed.py` renders
-the same statements with inlined literals for `wrangler d1 execute --file`.
+the same statements with inlined literals, for `sqlite3 <db> < file.sql`.
 """
 
 from __future__ import annotations
