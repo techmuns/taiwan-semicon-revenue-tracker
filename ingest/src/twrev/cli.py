@@ -476,8 +476,16 @@ def cmd_export(args: argparse.Namespace) -> int:
     moves to the browser.
     """
     from . import export, store
+    from .relationships import load_relationships
 
     universe, sources = load_universe(), load_sources()
+    # The de-duplication pairs the heatmap needs. Passed explicitly rather than
+    # defaulted, because an empty list is a valid configuration (no
+    # consolidation) and is indistinguishable from having forgotten to load
+    # them - and forgetting overstates every Rack / ODM figure by the whole of
+    # Wiwynn's revenue, silently, with the members_* counts still describing
+    # the de-duplicated set.
+    consolidation = [(c.parent, c.child) for c in load_relationships().consolidation]
     db_path = Path(args.db or (repo_root() / "data" / "pipeline.sqlite")).resolve()
     if not db_path.exists():
         print(f"no store at {db_path} - run `refresh` first", file=sys.stderr)
@@ -488,13 +496,16 @@ def cmd_export(args: argparse.Namespace) -> int:
     try:
         store.assert_view_contract(conn)
         rows = conn.execute("SELECT count(*) FROM raw_revenue").fetchone()[0]
-        written = export.write_all(conn, universe, sources, out)
+        written = export.write_all(
+            conn, universe, sources, out, consolidation=consolidation
+        )
     finally:
         conn.close()
 
     print(f"export {db_path}  ->  {out}")
     print(f"  store  : {rows} raw rows")
-    for name in ("meta.json", "analytics.json", "export.csv"):
+    print(f"  dedupe : {len(consolidation)} consolidation pair(s) applied")
+    for name in ("meta.json", "analytics.json", "heatmap.json", "quality.json", "export.csv"):
         print(f"  {name:16} {written[name]:>9,} bytes")
     companies = sum(v for k, v in written.items() if k.startswith("company/"))
     print(f"  company/*.json   {companies:>9,} bytes over "

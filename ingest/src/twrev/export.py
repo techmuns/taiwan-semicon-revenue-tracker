@@ -251,8 +251,18 @@ def write_all(
     universe: Universe,
     sources: Sources,
     out_dir: Path,
+    *,
+    consolidation: Sequence[tuple[str, str]] = (),
+    from_month: str = DEFAULT_FROM,
 ) -> dict[str, int]:
-    """Write every file the dashboard reads. Returns name -> bytes written."""
+    """Write every file the dashboard reads. Returns name -> bytes written.
+
+    Every endpoint the Worker answered out of D1, as files. `consolidation`
+    comes from config/relationships.yaml and must be passed: with it defaulted
+    to empty the heatmap silently stops de-duplicating and every Rack / ODM
+    figure is overstated by Wiwynn's whole revenue. The publish command passes
+    it; the assertion below is what stops anything else forgetting to.
+    """
     out_dir = Path(out_dir)
     (out_dir / "company").mkdir(parents=True, exist_ok=True)
     written: dict[str, int] = {}
@@ -271,10 +281,125 @@ def write_all(
     for company in universe:
         dump(f"company/{company.ticker}.json", build_company(conn, company.ticker))
 
+    dump("quality.json", build_quality(conn))
+    dump(
+        "heatmap.json",
+        build_heatmap(conn, consolidation, from_month=from_month),
+    )
+
     csv_text = build_csv(conn)
     (out_dir / "export.csv").write_text(csv_text, encoding="utf-8", newline="")
     written["export.csv"] = len(csv_text.encode("utf-8"))
     return written
+
+
+# ------------------------------------------------------------------ quality --
+
+
+def _obligated(cell: dict[str, Any]) -> bool:
+    """Was this company OWED a filing in this month?  Mirrors api.ts:obligated().
+
+    The basis for the coverage percentage, so getting it wrong reports absences
+    that were never due as failures - which is how a reader is trained to
+    ignore the number. 6286 is the standing case: merged, no obligation, and
+    counting it would peg coverage at 97.3% forever.
+
+    `status != "merged"` was too narrow. The schema's CHECK also permits
+    'delisted' and 'suspended', and universe.yaml's editing rule is "to retire a
+    name, set `status` and `active_to`" - so a delisted company counted as
+    trackable for every month in the window, including months after it stopped
+    existing. The WINDOW decides it, not the label: a month inside
+    [active_from, active_to] was owed a filing whatever the status is TODAY,
+    which is the point - status is a fact about now, coverage is a time series.
+    """
+    if cell.get("active_from") and cell["month"] < cell["active_from"]:
+        return False
+    if cell.get("active_to") and cell["month"] > cell["active_to"]:
+        return False
+    return cell["status"] == "active" or bool(cell.get("active_to")) or bool(cell.get("active_from"))
+
+
+def build_quality(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Mirrors api.ts:quality(), the four statements and the coverage maths."""
+    cells = _rows(
+        conn,
+        """SELECT b.ticker, b.display_name, b.bucket, b.tier, b.status, b.month,
+                  b.has_data, b.source_id, u.active_from, u.active_to
+             FROM analytics_base b JOIN universe u USING (ticker)
+            ORDER BY b.sort_order, b.ticker, b.month_idx""",
+    )
+    # Interior gaps: a month with no data that has data SOMEWHERE before it and
+    # SOMEWHERE after it. Bounded against each ticker's first and last filed
+    # month rather than LAG/LEAD by one, because the one-month form only ever
+    # found holes exactly one month wide - two consecutive missing months
+    # disqualified each other and the longer outage reported clean.
+    gaps = _rows(
+        conn,
+        """WITH r AS (
+             SELECT ticker,
+                    MIN(CASE WHEN has_data = 1 THEN month_idx END) AS first_idx,
+                    MAX(CASE WHEN has_data = 1 THEN month_idx END) AS last_idx
+               FROM analytics_base GROUP BY ticker
+           )
+           SELECT b.ticker, b.display_name, b.status, b.month
+             FROM analytics_base b JOIN r ON r.ticker = b.ticker
+            WHERE b.has_data = 0
+              AND b.month_idx > r.first_idx
+              AND b.month_idx < r.last_idx
+            ORDER BY b.ticker, b.month_idx""",
+    )
+    findings = _rows(
+        conn,
+        """SELECT run_id, created_at_utc, severity, code, month, ticker, source_id, message
+             FROM quality_findings
+            ORDER BY CASE severity WHEN 'error' THEN 1 WHEN 'warn' THEN 2 ELSE 3 END,
+                     code, month, ticker
+            LIMIT 500""",
+    )
+    fetch_log = _rows(
+        conn,
+        """SELECT source_id, month, COUNT(*) AS fetches,
+                  SUM(ok) AS ok_n, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS fail_n,
+                  MAX(fetched_at_utc) AS last_fetch_utc
+             FROM fetch_log GROUP BY source_id, month ORDER BY month, source_id""",
+    )
+
+    with_data = sum(1 for c in cells if c["has_data"] == 1)
+    trackable = [c for c in cells if _obligated(c)]
+    trackable_with_data = sum(1 for c in trackable if c["has_data"] == 1)
+
+    def pct(n: int, d: int) -> float | None:
+        return round(100 * n / d, 2) if d else None
+
+    return {
+        "coverage": {
+            "cells": len(cells),
+            "with_data": with_data,
+            "pct": pct(with_data, len(cells)),
+            "trackable_cells": len(trackable),
+            "trackable_with_data": trackable_with_data,
+            "trackable_pct": pct(trackable_with_data, len(trackable)),
+            # Every absence that was not a failure, whatever made it so - a
+            # merger, a delisting, or a month outside the active window.
+            # Listing only the merged ones left a delisted name's absences
+            # unexplained.
+            "known_absent": [
+                {
+                    "ticker": c["ticker"],
+                    "month": c["month"],
+                    "status": c["status"],
+                    "active_from": c.get("active_from"),
+                    "active_to": c.get("active_to"),
+                }
+                for c in cells
+                if c["has_data"] == 0 and not _obligated(c)
+            ],
+        },
+        "matrix": cells,
+        "interior_gaps": gaps,
+        "findings": findings,
+        "fetch_log": fetch_log,
+    }
 
 
 # ------------------------------------------------------------------ heatmap --
