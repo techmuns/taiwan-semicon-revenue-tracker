@@ -96,8 +96,11 @@ RE_ROC_BANNER = re.compile(r"民國\s*(\d{2,3})\s*年\s*(\d{1,2})\s*月")
 # cannot match - so 3661 and 6415 silently lost the issuer's mandatory
 # explanation of the revenue swing, which is exactly the sentence a reader wants
 # when the -KY levels already carry a comparability caveat. RE_NOTE_KY closes
-# that, and worker/src/mops.ts takes the same cell from its parsed rows so both
-# writers of source_id 'mops_company' agree - `note` is inside row_hash.
+# that. `note` is inside row_hash, so a parser that drops it hashes the filing
+# differently and every subsequent run reads as a restatement that never
+# happened. There used to be a second writer of source_id 'mops_company' - the
+# Worker's repair path, worker/src/mops.ts - and the two had to agree; it went
+# with the Worker's cron, so this parser is now the only one.
 RE_NOTE = re.compile(r"營收變化原因說明\s*</TH>\s*<TD[^>]*>(.*?)</TD>", re.I | re.S)
 RE_NOTE_KY = re.compile(
     r"<td[^>]*>\s*備註\s*</td>\s*<td[^>]*>(.*?)</td>", re.I | re.S

@@ -160,9 +160,9 @@ def test_ky_form_note_is_not_dropped(fixtures_dir, name, ticker, month, fragment
     Only the second label was matched, so the issuer's mandatory explanation of
     the revenue swing was silently discarded for exactly the two filers whose
     LEVELS already carry a comparability caveat - the sentence a reader most
-    wants when they cannot compare the level. `note` is inside row_hash, so this
-    also has to agree with worker/src/mops.ts or the two writers of
-    source_id='mops_company' would hash the same filing differently.
+    wants when they cannot compare the level. `note` is inside row_hash, so a
+    parser that drops it hashes the filing differently and the next run reads as
+    a restatement that never happened.
     """
     out = mc.parse_from_bytes(load(fixtures_dir, name), ticker=ticker, month=month)
     assert out.row["note"], "the -KY 備註 was lost"
