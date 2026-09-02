@@ -1,1019 +1,129 @@
 /**
- * Read-only JSON API over the D1 analytics views.
+ * What is left of the API after Cloudflare D1.
  *
- * Two rules hold everywhere in this file:
+ * There were seven endpoints and 25 `env.DB` call sites. All of them are gone:
+ * every answer the dashboard needs is a static file published by
+ * `twrev export`, and the browser filters them (web/src/dataset.ts). The one
+ * aggregation that genuinely needed a GROUP BY - the bucket heatmap - is
+ * computed at publish time by the same SQL statement that ran on D1, out of
+ * ingest/src/twrev/sql/heatmap_bucket.sql, and shipped as answers.
  *
- * 1. **Every value is bound, never interpolated.** Filters accept comma-separated
- *    lists, which means building `IN (?,?,?)` placeholder lists by hand - the one
- *    place a mistake would become an injection, so `inClause()` is the single
- *    helper that does it and nothing else constructs SQL from input.
+ * Two things remain server-side, and both earn their place.
  *
- * 2. **NULL is preserved as null.** Never coalesced to 0. A month a company did
- *    not file and a month it earned nothing are different facts, and the whole
- *    point of the universe-x-months grid in the view is to keep them distinct.
+ * /api/health, because a liveness check a reader's own browser can compute is
+ * not a liveness check. It reads the PUBLISHED meta.json through the assets
+ * binding - the same bytes a reader gets - and returns 503 when that file is
+ * missing, unparseable or empty. That is the same rule the D1 version followed
+ * ("a monitor that only reads the status code would otherwise see green on an
+ * empty database"), and it is the reason this endpoint was not simply deleted:
+ * during the D1 outage that prompted this migration, every data endpoint was
+ * failing while /api/health reported ok:true, and nothing external could see it.
  *
- * The twelve-column contract lives in the `analytics_monthly` view, not here, so
- * the CSV export selects it wholesale rather than restating the column list.
+ * The retired routes answer 410 rather than 404. A 404 says "wrong URL" and
+ * invites a retry; 410 says the resource is deliberately gone and names its
+ * replacement, which is what an old bookmark or a stale cached bundle needs.
  */
 
-import { accessPosture, type AccessEnv } from "./access";
-import { CONSOLIDATION } from "./generated/relationships";
-import { addMonths } from "./normalize";
-
-export interface Env extends AccessEnv {
-  DB: D1Database;
-  /**
-   * Optional on purpose. The [assets] binding only exists once web/ has been
-   * built into worker/public, and the Worker has to be deployable before that -
-   * the API and the cron are useful with no dashboard, and a required binding
-   * would make the API's deploy depend on the frontend's build.
-   */
+export interface Env {
   ASSETS?: Fetcher;
+  DASHBOARD_KEY?: string;
+  CF_ACCESS_AUD?: string;
+  CF_ACCESS_TEAM_DOMAIN?: string;
 }
 
-/**
- * Dec 2025 is fetched as a shoulder month for two reasons that only matter at
- * the edges: the per-company MOPS endpoint carries no 上月營收, so Jan 2026 has
- * no MoM without it, and Jan 2026's prior_month_yoy_pct needs Dec's own YoY.
- * It is real data and queryable via ?from=2025-12, but it is not part of the
- * requested Jan-Jul window, so it is excluded by default.
- */
-export const DEFAULT_FROM = "2026-01";
-
-const MONTH_RE = /^\d{4}-\d{2}$/;
-const TICKER_RE = /^\d{4}[A-Z]?$/;
-
-/** Metrics the heatmap will aggregate. A closed set - these reach a SQL column name. */
-const HEATMAP_METRICS = new Set([
-  "yoy_acceleration_ppt",
-  "yoy_pct",
-  "mom_pct",
-  "cumulative_yoy_pct",
-]);
-
-export async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
-  const url = new URL(request.url);
-
-  try {
-    if (path === "/api/health") {
-      // An unhealthy answer must not be a 200, and must never be cached: a
-      // monitor that only reads the status code would otherwise see green on an
-      // empty database, and json() stamps every 200 as public max-age=300, so
-      // the green would then be replayed for five minutes after a real recovery.
-      const body = await health(env);
-      return json(body, body.ok ? 200 : 503);
-    }
-    if (path === "/api/meta") return json(await meta(env));
-    if (path === "/api/analytics") return json(await analytics(env, url));
-    if (path === "/api/heatmap") {
-      const body = await heatmap(env, url);
-      return json(body, "error" in body ? 400 : 200);
-    }
-    if (path === "/api/quality") return json(await quality(env));
-    if (path === "/api/export.csv") return exportCsv(env, url);
-
-    const company = path.match(/^\/api\/company\/([^/]+)$/);
-    if (company) {
-      const body = await companyDetail(env, decodeURIComponent(company[1]));
-      // Distinguish "you asked for a ticker that is not a ticker" from "that
-      // ticker is not in this universe" - a 200 for either meant the dashboard
-      // cached a not-found for five minutes and rendered it as an empty company.
-      const notFound = "error" in body && String(body.error).startsWith("unknown ticker");
-      return json(body, "error" in body ? (notFound ? 404 : 400) : 200);
-    }
-
-    return json({ error: "not found", path }, 404);
-  } catch (err) {
-    if (err instanceof BadFilterError) {
-      return json({ error: "invalid filter", ...err.detail }, 400);
-    }
-    throw err;
-  }
-}
-
-// ------------------------------------------------------------------ /health --
-
-async function health(env: Env) {
-  const out: Record<string, unknown> = {
-    ok: true,
-    service: "taiwan-semicon-revenue-tracker",
-  };
-  try {
-    const row = await env.DB.prepare(
-      `SELECT (SELECT COUNT(*) FROM universe)     AS universe_n,
-              (SELECT COUNT(*) FROM raw_revenue)  AS raw_n,
-              (SELECT MAX(month) FROM raw_revenue) AS latest_month`,
-    ).first<{ universe_n: number; raw_n: number; latest_month: string | null }>();
-    out.d1 = { bound: true, ...row };
-    // Honest health: bound-but-empty is not healthy, and a green check on an
-    // empty database is exactly the thing that gets deployed and forgotten.
-    out.ok = (row?.raw_n ?? 0) > 0;
-    if (!out.ok) out.hint = "schema present but no revenue rows - seed not loaded";
-  } catch (err) {
-    out.ok = false;
-    out.d1 = { bound: false, error: errText(err) };
-  }
-  return out;
-}
-
-// -------------------------------------------------------------------- /meta --
-
-async function meta(env: Env) {
-  const [universe, months, sources, freshness, findings, gaps, severe, consolidated] =
-    await env.DB.batch<any>([
-    env.DB.prepare(
-      // active_from/active_to are here so the dashboard can apply the SAME
-      // obligation rule as quality()'s coverage basis. Without them the client
-      // fell back to status === 'active', which a company retired mid-window
-      // makes wrong in both directions - it can print "36 of 35 trackable filed".
-      `SELECT ticker, display_name, name_zh, bucket, tier, market_hint, status,
-              active_from, active_to, successor, thesis, notes, sort_order
-         FROM universe ORDER BY sort_order, ticker`,
-    ),
-    env.DB.prepare(`SELECT month FROM month_spine ORDER BY month_idx`),
-    env.DB.prepare(
-      `SELECT source_id, COUNT(*) AS rows_n, MIN(month) AS first_month,
-              MAX(month) AS last_month, MAX(last_seen_utc) AS last_seen_utc
-         FROM raw_revenue GROUP BY source_id ORDER BY source_id`,
-    ),
-    env.DB.prepare(
-      // COUNT(DISTINCT ticker), not COUNT(*): raw_revenue is keyed
-      // (source_id, month, ticker), so a month held by two feeds counted every
-      // company once per feed. Today every 2026-07 row is mops_company so the
-      // figure looks right, but the first cron run that writes _L (31) and _O
-      // (5) alongside would have reported 72 of 36 names filed.
-      `SELECT month, COUNT(DISTINCT ticker) AS tickers_with_data,
-              MAX(last_seen_utc) AS last_seen_utc
-         FROM raw_revenue WHERE revenue_month IS NOT NULL
-        GROUP BY month ORDER BY month_idx`,
-    ),
-    env.DB.prepare(
-      `SELECT severity, code, COUNT(*) AS n FROM quality_findings
-        GROUP BY severity, code ORDER BY
-          CASE severity WHEN 'error' THEN 1 WHEN 'warn' THEN 2 ELSE 3 END, code`,
-    ),
-    /*
-     * The three reader-facing alerts. They live on /api/meta rather than
-     * /api/quality because meta is fetched once and is in hand on every tab,
-     * and because there is no longer a Quality tab to open: a problem has to
-     * reach whoever is looking at revenue, wherever they happen to be looking.
-     *
-     * Interior gaps: a month with no data that has data SOMEWHERE before and
-     * SOMEWHERE after. Trailing absence is a pending filing and leading absence
-     * is a name that joined the window late; neither is a defect. Bounding
-     * against each ticker's first and last filed month rather than comparing
-     * with LAG/LEAD is what lets it see a gap more than one month wide.
-     */
-    env.DB.prepare(
-      `WITH r AS (
-         SELECT ticker,
-                MIN(CASE WHEN has_data = 1 THEN month_idx END) AS first_idx,
-                MAX(CASE WHEN has_data = 1 THEN month_idx END) AS last_idx
-           FROM analytics_base GROUP BY ticker
-       )
-       SELECT b.ticker, b.display_name, b.month
-         FROM analytics_base b JOIN r ON r.ticker = b.ticker
-        WHERE b.has_data = 0
-          AND b.month_idx > r.first_idx
-          AND b.month_idx < r.last_idx
-        ORDER BY b.ticker, b.month_idx`,
-    ),
-    // error and warn only. `info` findings are per-company colour - the
-    // consolidated-basis and no-filing-obligation notes - and every one of them
-    // is already stated in universe.notes on the company itself.
-    env.DB.prepare(
-      `SELECT severity, code, ticker, month, message
-         FROM quality_findings WHERE severity IN ('error', 'warn')
-        ORDER BY CASE severity WHEN 'error' THEN 1 ELSE 2 END, code, month, ticker
-        LIMIT 20`,
-    ),
-    // Filers whose revenue LEVELS are not comparable with the standalone
-    // filers. Read off the findings rather than hardcoded, so a third such
-    // name entering the universe footnotes itself.
-    env.DB.prepare(
-      `SELECT DISTINCT f.ticker, u.display_name
-         FROM quality_findings f JOIN universe u ON u.ticker = f.ticker
-        WHERE f.code = 'CONSOLIDATED_BASIS' AND f.ticker IS NOT NULL
-        ORDER BY u.sort_order`,
-    ),
-  ]);
-
-  const allMonths: string[] = months.results.map((r: any) => r.month);
-  const buckets = dedupeInOrder(universe.results.map((r: any) => r.bucket));
-
-  return {
-    universe: universe.results,
-    buckets,
-    tiers: [1, 2],
-    months: allMonths,
-    // The window the dashboard opens on, vs everything queryable.
-    default_from: DEFAULT_FROM,
-    shoulder_months: allMonths.filter((m) => m < DEFAULT_FROM),
-    latest_month: allMonths.length ? allMonths[allMonths.length - 1] : null,
-    sources: sources.results,
-    freshness: freshness.results,
-    findings_by_code: findings.results,
-    alerts: {
-      interior_gaps: gaps.results,
-      severe_findings: severe.results,
-      // The LIST is capped at 20 so a bad month cannot ship a thousand-line
-      // strip; the COUNT must not be. The dashboard renders this number, and
-      // rendering the capped array's length said "20 open findings" when there
-      // were more - understating a data-quality problem, which is the one
-      // direction it must never be wrong in. `findings_by_code` is an uncapped
-      // GROUP BY over the same rows, so the true total costs no extra query.
-      severe_total: findings.results.reduce(
-        (n: number, r: any) =>
-          r.severity === "error" || r.severity === "warn" ? n + (r.n ?? 0) : n,
-        0,
-      ),
-      consolidated: consolidated.results,
-    },
-    access: accessPosture(env),
-    // Stated once, here, so no consumer has to guess at the scale.
-    units: {
-      revenue: "TWD thousands",
-      percentages: "percent",
-      acceleration: "percentage points",
-    },
-  };
-}
-
-// --------------------------------------------------------------- /analytics --
-
-interface Filters {
-  from: string;
-  to: string | null;
-  tickers: string[];
-  buckets: string[];
-  tiers: number[];
-  onlyWithData: boolean;
-}
-
-/**
- * Thrown when a filter parameter was supplied but nothing in it survived
- * validation. See readFilters.
- */
-export class BadFilterError extends Error {
-  constructor(readonly detail: { parameter: string; supplied: string; expected: string }) {
-    super(`invalid ${detail.parameter}: ${detail.supplied}`);
-    this.name = "BadFilterError";
-  }
-}
-
-/**
- * Parse the filter parameters, REJECTING rather than silently discarding.
- *
- * Dropping an invalid value used to widen the answer instead of narrowing it:
- * whereFor only emits an IN clause for a non-empty list, so a filter that
- * validated to nothing became no filter at all. Live, before this change,
- * `?tickers=2330.TW` (a plausible pasted Yahoo symbol) returned all 37 names
- * rather than one, and `?tiers=3` did the same - the caller asked for a subset
- * and was handed the universe with a 200 and no indication anything was ignored.
- *
- * Worse, it was inconsistent in the dangerous direction: an unvalidated field
- * like `buckets` matched nothing and correctly returned 0 rows, so the same
- * class of typo narrowed one filter to empty and widened another to everything.
- *
- * A filter whose meaning could not be honoured is a client error, so it is one.
- */
-function readFilters(url: URL): Filters {
-  const q = url.searchParams;
-
-  const parse = <T>(
-    parameter: string,
-    map: (raw: string) => T | null,
-    expected: string,
-  ): T[] => {
-    const raw = q.get(parameter);
-    const supplied = list(raw);
-    // Absent, or present-but-empty (`?tickers=`), both mean "no filter".
-    if (!supplied.length) return [];
-    const kept = supplied.map(map).filter((v): v is T => v !== null);
-    if (kept.length !== supplied.length) {
-      throw new BadFilterError({ parameter, supplied: raw ?? "", expected });
-    }
-    return kept;
-  };
-
-  const from = q.get("from");
-  if (from !== null && from !== "" && month(from) === null) {
-    throw new BadFilterError({ parameter: "from", supplied: from, expected: "YYYY-MM" });
-  }
-  const to = q.get("to");
-  if (to !== null && to !== "" && month(to) === null) {
-    throw new BadFilterError({ parameter: "to", supplied: to, expected: "YYYY-MM" });
-  }
-
-  return {
-    from: month(from) ?? DEFAULT_FROM,
-    to: month(to),
-    tickers: parse("tickers", (t) => (TICKER_RE.test(t) ? t : null), "4 digits, optionally + one A-Z"),
-    buckets: list(q.get("buckets")),
-    tiers: parse(
-      "tiers",
-      (t) => (t === "1" || t === "2" ? Number(t) : null),
-      "1 or 2",
-    ),
-    onlyWithData: q.get("only_with_data") === "1",
-  };
-}
-
-/**
- * The half of the filter contract `readFilters` cannot enforce on its own.
- *
- * `readFilters` rejects anything MALFORMED, and its docstring above states the
- * rule: reject rather than silently discard, because a discarded value widens
- * the answer instead of narrowing it. But two filters can be perfectly well
- * formed and still match nothing real - `?buckets=Substrate` after that stage is
- * renamed in universe.yaml, or `?tickers=9999`, which passes TICKER_RE and is
- * not a company. Both returned 200 with a quietly smaller set, and
- * `?buckets=AI Silicon,Nonsense` returned the three AI Silicon rows as though
- * that were the whole answer.
- *
- * That matters here specifically because every view is shareable by URL: a link
- * sent before a stage was renamed would arrive showing fewer companies with
- * nothing to say it had. Now it 400s with the same shape a bad tier gets.
- *
- * One query, and only when such a filter is present - the default path pays
- * nothing.
- */
-async function assertFiltersMatchTheUniverse(env: Env, f: Filters): Promise<void> {
-  if (!f.buckets.length && !f.tickers.length) return;
-  const rows = await env.DB.prepare(`SELECT ticker, bucket FROM universe`).all<any>();
-  const tickers = new Set(rows.results.map((r) => r.ticker));
-  const buckets = new Set(rows.results.map((r) => r.bucket));
-
-  const unknownBucket = f.buckets.filter((b) => !buckets.has(b));
-  if (unknownBucket.length) {
-    throw new BadFilterError({
-      parameter: "buckets",
-      supplied: unknownBucket.join(","),
-      expected: [...buckets].join(" | "),
-    });
-  }
-  const unknownTicker = f.tickers.filter((t) => !tickers.has(t));
-  if (unknownTicker.length) {
-    throw new BadFilterError({
-      parameter: "tickers",
-      supplied: unknownTicker.join(","),
-      expected: "a ticker in this universe - see /api/meta",
-    });
-  }
-}
-
-/**
- * Shared WHERE builder. Returns SQL fragments plus the bindings, in order.
- *
- * `revenueCol` exists because the two views name the same figure differently:
- * `analytics_monthly` renames it to the brief's `revenue_twd_thousands`, while
- * `analytics_base` keeps the raw-layer name `revenue_month`.
- */
-function whereFor(
-  f: Filters,
-  opts: { prefix?: string; revenueCol?: string } = {},
-): { sql: string; binds: unknown[] } {
-  const { prefix = "", revenueCol = "revenue_twd_thousands" } = opts;
-  const col = (name: string) => (prefix ? `${prefix}.${name}` : name);
-  const clauses: string[] = [`${col("month")} >= ?`];
-  const binds: unknown[] = [f.from];
-
-  if (f.to) {
-    clauses.push(`${col("month")} <= ?`);
-    binds.push(f.to);
-  }
-  if (f.tickers.length) {
-    clauses.push(`${col("ticker")} IN ${inClause(f.tickers.length)}`);
-    binds.push(...f.tickers);
-  }
-  if (f.buckets.length) {
-    clauses.push(`${col("bucket")} IN ${inClause(f.buckets.length)}`);
-    binds.push(...f.buckets);
-  }
-  if (f.tiers.length) {
-    clauses.push(`${col("tier")} IN ${inClause(f.tiers.length)}`);
-    binds.push(...f.tiers);
-  }
-  if (f.onlyWithData) clauses.push(`${col(revenueCol)} IS NOT NULL`);
-
-  return { sql: clauses.join(" AND "), binds };
-}
-
-/**
- * The twelve columns, ordered in supply-chain sequence.
- *
- * `a.*` is exactly the brief's twelve columns because that is what the view
- * defines - restating them would be a second place to get the order wrong. The
- * join to `universe` exists ONLY to reach `sort_order`, which the view
- * deliberately does not expose: buckets have to come out in chain order (silicon
- * -> packaging -> substrate -> ...), and alphabetising them would destroy the one
- * reading the whole tracker is built around. Relying on the view's own internal
- * ORDER BY would work today but is not guaranteed to survive query flattening.
- */
-const TWELVE_COLUMN_SELECT =
-  "SELECT a.* FROM analytics_monthly a JOIN universe u USING (ticker)";
-const TWELVE_COLUMN_ORDER = "ORDER BY u.sort_order, a.ticker, a.month";
-
-async function analytics(env: Env, url: URL) {
-  const f = readFilters(url);
-  await assertFiltersMatchTheUniverse(env, f);
-  const { sql, binds } = whereFor(f, { prefix: "a" });
-  // Ordering by month text is safe: 'YYYY-MM' sorts lexicographically.
-  const rows = await env.DB.prepare(
-    `${TWELVE_COLUMN_SELECT} WHERE ${sql} ${TWELVE_COLUMN_ORDER}`,
-  )
-    .bind(...binds)
-    .all();
-
-  return { filters: f, count: rows.results.length, rows: rows.results };
-}
-
-// ----------------------------------------------------------------- /heatmap --
-
-/**
- * Bucket-level aggregation.
- *
- * Default is REVENUE-WEIGHTED: sum(revenue) / sum(prior-year revenue) - 1 across
- * the bucket's members, i.e. the bucket treated as one portfolio. An equal-
- * weighted mean of member percentages is dominated by the smallest company in
- * the bucket, which is the wrong signal for "is this stage of the chain
- * inflecting" - a 200% move at a NT$2bn name is not comparable to a 40% move at
- * TSMC.
- *
- * Both legs must be present for a member to count, and `members` is returned so
- * a change in bucket composition between months is visible rather than silently
- * changing the denominator. Median is not offered: buckets hold 1-5 names, where
- * a median is noisier than either alternative and harder to explain.
- */
-async function heatmap(env: Env, url: URL) {
-  const f = readFilters(url);
-  await assertFiltersMatchTheUniverse(env, f);
-  const metric = url.searchParams.get("metric") ?? "yoy_acceleration_ppt";
-  if (!HEATMAP_METRICS.has(metric)) {
-    return {
-      error: `unknown metric ${metric}`,
-      allowed: [...HEATMAP_METRICS],
-    };
-  }
-  const group = url.searchParams.get("group") === "ticker" ? "ticker" : "bucket";
-  const agg = url.searchParams.get("agg") === "equal" ? "equal" : "weighted";
-
-  if (group === "ticker") {
-    // Per-ticker there is nothing to aggregate: the metric is the metric.
-    const { sql, binds } = whereFor(f, { prefix: "a" });
-    const rows = await env.DB.prepare(
-      `SELECT a.ticker, a.company_name, a.bucket, a.tier, a.month,
-              a.${metric} AS value, a.revenue_twd_thousands AS revenue
-         FROM analytics_monthly a JOIN universe u USING (ticker)
-        WHERE ${sql} ORDER BY u.sort_order, a.ticker, a.month`,
-    )
-      .bind(...binds)
-      .all();
-    return { group, metric, agg: "none", filters: f, cells: rows.results };
-  }
-
-  // Aggregate over ONE MONTH MORE than the window shows, then drop it at the end.
-  //
-  // Acceleration at the bucket level is a difference of two consecutive monthly
-  // aggregates, so the first displayed month needs the month before it to exist
-  // inside the CTE. Filtering to `from` first is what made January null for every
-  // stage while the per-ticker view - whose LAG runs over the whole series - had a
-  // value for it. That is exactly what the Dec 2025 shoulder month was fetched
-  // for; the aggregate has to reach for it too.
-  const { sql, binds } = whereFor(
-    { ...f, from: addMonths(f.from, -1) },
-    { prefix: "b", revenueCol: "revenue_month" },
-  );
-
-  // Drop companies whose revenue is ALREADY INSIDE another tracked company's
-  // reported figure before anything is summed. Wistron consolidates Wiwynn, so
-  // Rack / ODM was counting Wiwynn's revenue twice - once standalone and once
-  // inside Wistron - which overstated the stage's revenue by 6.7% and pulled its
-  // revenue-weighted growth toward the double-counted member.
-  //
-  // It goes in the CTE's WHERE rather than into each conditional aggregate on
-  // purpose: the paired-predicate invariant this query depends on requires every
-  // numerator and its denominator to be summed over a TEXTUALLY IDENTICAL
-  // predicate, and adding a term to nine of them by hand is exactly how that
-  // stops being true. Excluding the row before the aggregates see it keeps all
-  // nine pairs identical to each other for free, and keeps `members_*` honest -
-  // an excluded member is not counted, so no denominator claims it.
-  //
-  // Only aggregates are touched. group=ticker above, /api/analytics, the CSV and
-  // the company detail all still return Wiwynn's own rows unchanged, because a
-  // subsidiary's own filed revenue is perfectly real - it is only ADDING it to
-  // its parent's that double counts.
-  //
-  // AND THE EXCLUSION IS CONDITIONAL ON THE PARENT HAVING FILED THAT MONTH. If
-  // Wistron has not filed yet and Wiwynn has - the ordinary state between the
-  // 11th and 14th refresh passes - then no row on the page contains Wiwynn's
-  // revenue, and dropping it removes a real filing rather than a duplicate one.
-  // Unconditional exclusion understated the stage by exactly the child's own
-  // revenue in that case, while `members_*` went on describing the smaller set
-  // as though the omission were a de-duplication.
-  const pairSql = CONSOLIDATION.length
-    ? `,
-     pair(parent, child) AS (VALUES ${CONSOLIDATION.map(() => "(?, ?)").join(", ")}),
-     scoped AS (
-       SELECT a.* FROM all_rows a
-        WHERE NOT EXISTS (
-          SELECT 1 FROM pair p
-            JOIN all_rows x ON x.ticker = p.parent
-                           AND x.month_idx = a.month_idx
-                           AND x.revenue_month IS NOT NULL
-           WHERE p.child = a.ticker)
-     )`
-    : `,
-     scoped AS (SELECT * FROM all_rows)`;
-  const excludeBinds = CONSOLIDATION.flatMap((c) => [c.parent, c.child]);
-  // Aggregate per bucket-month from the LEVELS, then difference consecutive
-  // months for acceleration - the same recompute-from-integers rule the
-  // per-ticker view follows, applied one level up.
-  //
-  // Every ratio has its numerator and denominator summed over the SAME member
-  // set, via paired conditional aggregates. Summing all revenue over one set and
-  // all prior-year revenue over another is the failure mode here: it silently
-  // reports a bucket as growing because a member with no prior-year figure was
-  // counted in the numerator only. Hence a `members_*` count per ratio - and the
-  // ratio is emitted only when the set is non-empty.
-  const rows = await env.DB.prepare(
-    `WITH all_rows AS (
-       -- The filtered universe, materialised ONCE so the de-duplication and the
-       -- membership comparison can both reuse it without binding the filter
-       -- parameters again.
-       SELECT * FROM analytics_base b WHERE ${sql}
-     )${pairSql},
-     member AS (
-       -- Who is actually behind the weighted YoY in each bucket-month. Same
-       -- predicate as members_yoy, so this is that set enumerated rather than
-       -- merely counted.
-       SELECT bucket, month_idx, ticker FROM scoped
-        WHERE revenue_month IS NOT NULL AND revenue_yoy_month > 0
-     ),
-     churn AS (
-       /*
-        * Did the member SET change against the IMMEDIATELY PRECEDING month?
-        *
-        * This replaces comparing LAG(members_yoy) - the count - which was wrong
-        * twice. A 1-for-1 swap changes the set without changing its size: blank
-        * 8081's July row and add 6286's, and Analog Cycle goes from
-        * {4919,6138,6415,8081} to {4919,6138,6286,6415} with the count still 4,
-        * so the caveat never appeared over an acceleration differencing two
-        * different sets. And LAG walks to the previous PRESENT row, which is not
-        * the previous month when a whole stage files nothing - blank Networking's
-        * only member in June and July's flag was computed against MAY while the
-        * tooltip said "vs prior month".
-        *
-        * Joining on month_idx - 1 makes adjacency structural rather than a gate
-        * that can be forgotten, and comparing tickers makes it identity rather
-        * than size.
-        */
-       SELECT bucket, month_idx, SUM(chg) AS changed FROM (
-         SELECT m.bucket AS bucket, m.month_idx AS month_idx, 1 AS chg
-           FROM member m LEFT JOIN member p
-             ON p.bucket = m.bucket AND p.ticker = m.ticker
-            AND p.month_idx = m.month_idx - 1
-          WHERE p.ticker IS NULL
-         UNION ALL
-         SELECT p.bucket AS bucket, p.month_idx + 1 AS month_idx, 1 AS chg
-           FROM member p LEFT JOIN member m
-             ON m.bucket = p.bucket AND m.ticker = p.ticker
-            AND m.month_idx = p.month_idx + 1
-          WHERE m.ticker IS NULL
-       ) GROUP BY bucket, month_idx
-     ),
-     per_bucket AS (
-       SELECT b.bucket, b.month, b.month_idx,
-              SUM(CASE WHEN b.revenue_month IS NOT NULL THEN 1 ELSE 0 END) AS members,
-              SUM(b.revenue_month) AS revenue,
-
-              -- Each pair's predicate is TEXTUALLY IDENTICAL to its members_*
-              -- counter, which is the only way the invariant above is actually
-              -- enforced rather than merely asserted. Gating the denominator on
-              -- a weaker predicate than the numerator is what breaks it: SUM
-              -- skips a NULL numerator silently while the denominator still
-              -- counts that member, so the ratio is computed over two different
-              -- sets and the members_* count describes only one of them.
-              --
-              -- MoM was the live case. analytics_base is universe CROSS JOIN
-              -- month_spine, and prev_revenue is a LAG over that dense grid, so
-              -- it survives on a row where revenue_month is NULL - a company
-              -- that filed last month but has not filed this one landed in
-              -- mom_den alone. A bucket with A (1,000,000 -> 1,100,000) and B
-              -- (500,000, not yet filed) reported -26.67% instead of +10.00%.
-              -- That is the normal state between the 11th and 14th cron runs,
-              -- which exist precisely to sweep up late filers.
-              SUM(CASE WHEN b.revenue_month IS NOT NULL AND b.revenue_yoy_month > 0
-                       THEN b.revenue_month END)     AS yoy_num,
-              SUM(CASE WHEN b.revenue_month IS NOT NULL AND b.revenue_yoy_month > 0
-                       THEN b.revenue_yoy_month END) AS yoy_den,
-              SUM(CASE WHEN b.revenue_month IS NOT NULL AND b.revenue_yoy_month > 0
-                       THEN 1 ELSE 0 END) AS members_yoy,
-
-              SUM(CASE WHEN b.revenue_month IS NOT NULL
-                            AND b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
-                       THEN b.revenue_month END) AS mom_num,
-              SUM(CASE WHEN b.revenue_month IS NOT NULL
-                            AND b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
-                       THEN b.prev_revenue END)  AS mom_den,
-              SUM(CASE WHEN b.revenue_month IS NOT NULL
-                            AND b.prev_month_idx = b.month_idx - 1 AND b.prev_revenue > 0
-                       THEN 1 ELSE 0 END) AS members_mom,
-
-              -- The EQUAL-weighted MoM averages b.mom_pct, and mom_pct is NOT the
-              -- same set as members_mom above. The view computes it from our own
-              -- preceding month when there is one and FALLS BACK to the source's
-              -- 上月營收 when there is not - a branch the OpenAPI feeds populate
-              -- and the per-company MOPS scrape does not. So a company that filed
-              -- this month but skipped last month has a mom_pct and is in the
-              -- average, while members_mom excludes it.
-              --
-              -- Reproduced on the live store: drop 4919's June row and give its
-              -- July row a 上月營收, and Analog Cycle's equal-weighted MoM is the
-              -- mean of FOUR companies while members_mom reports three. That is
-              -- the normal state between the 11th and 14th refresh passes, which
-              -- exist precisely to sweep up late filers.
-              COUNT(b.mom_pct) AS members_mom_equal,
-
-              SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
-                       THEN b.cum_revenue END)       AS cum_num,
-              SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
-                       THEN b.cum_revenue_prior END) AS cum_den,
-              SUM(CASE WHEN b.cum_revenue IS NOT NULL AND b.cum_revenue_prior > 0
-                       THEN 1 ELSE 0 END) AS members_cum,
-
-              AVG(b.yoy_pct) AS yoy_equal,
-              AVG(b.mom_pct) AS mom_equal
-         FROM scoped b
-        GROUP BY b.bucket, b.month, b.month_idx
-       HAVING members > 0
-     ),
-     calc AS (
-       SELECT p.*,
-         COALESCE(ch.changed, 0) AS members_churned,
-         CASE WHEN p.members_yoy > 0 AND p.yoy_den > 0
-              THEN ROUND(100.0 * (p.yoy_num * 1.0 / p.yoy_den - 1.0), 2) END AS yoy_weighted,
-         CASE WHEN p.members_mom > 0 AND p.mom_den > 0
-              THEN ROUND(100.0 * (p.mom_num * 1.0 / p.mom_den - 1.0), 2) END AS mom_weighted,
-         CASE WHEN p.members_cum > 0 AND p.cum_den > 0
-              THEN ROUND(100.0 * (p.cum_num * 1.0 / p.cum_den - 1.0), 2) END AS cum_yoy_weighted,
-         LAG(p.month_idx)   OVER w AS prev_idx,
-         LAG(CASE WHEN p.members_yoy > 0 AND p.yoy_den > 0
-                  THEN ROUND(100.0 * (p.yoy_num * 1.0 / p.yoy_den - 1.0), 2) END) OVER w
-           AS prev_yoy_weighted,
-         LAG(ROUND(p.yoy_equal, 2)) OVER w AS prev_yoy_equal
-       FROM per_bucket p
-       LEFT JOIN churn ch ON ch.bucket = p.bucket AND ch.month_idx = p.month_idx
-       WINDOW w AS (PARTITION BY p.bucket ORDER BY p.month_idx)
-     )
-     SELECT bucket, month, revenue,
-            members, members_yoy, members_mom, members_mom_equal, members_cum,
-            -- Gated on the same contiguity as the acceleration it caveats: with
-            -- no adjacent prior month there is no "vs prior month" to speak of,
-            -- and the acceleration is null there anyway.
-            CASE WHEN prev_idx = month_idx - 1 THEN members_churned END AS members_churned,
-            yoy_weighted, mom_weighted, cum_yoy_weighted,
-            ROUND(yoy_equal, 2) AS yoy_equal, ROUND(mom_equal, 2) AS mom_equal,
-            -- Contiguity-gated exactly as the per-ticker view gates it: across a
-            -- hole, LAG would difference two non-adjacent months.
-            CASE WHEN prev_idx = month_idx - 1
-                 THEN ROUND(yoy_weighted - prev_yoy_weighted, 2) END
-              AS acceleration_weighted,
-            CASE WHEN prev_idx = month_idx - 1
-                 THEN ROUND(ROUND(yoy_equal, 2) - prev_yoy_equal, 2) END
-              AS acceleration_equal
-       FROM calc
-      WHERE month >= ?
-      ORDER BY bucket, month`,
-  )
-    // The lookback month's own row is discarded here, after it has served as the
-    // LAG for the first displayed month. Bound last because it is the last
-    // placeholder in the statement text.
-    .bind(...binds, ...excludeBinds, f.from)
-    .all();
-
-  // The aggregation ACTUALLY APPLIED, which is not always the one requested:
-  // cumulative YoY has no equal-weighted variant (see the switch below). The
-  // response reports this rather than echoing the request, because the dashboard
-  // labels the figure from it - and a number computed one way under a caption
-  // saying the other is the exact failure this codebase exists to avoid.
-  // Selecting Cumulative YoY + Equal used to return the revenue-weighted value
-  // in all 70 cells under the caption "equal-weighted, one company one vote".
-  const applied: "weighted" | "equal" = metric === "cumulative_yoy_pct" ? "weighted" : agg;
-
-  // Map the requested metric onto the column the aggregation produced, so the
-  // client reads one `value` field regardless of which knobs were set.
-  const suffix = applied === "equal" ? "equal" : "weighted";
-  const pick = (r: any): number | null => {
-    switch (metric) {
-      case "yoy_acceleration_ppt":
-        return r[`acceleration_${suffix}`] ?? null;
-      case "yoy_pct":
-        return r[`yoy_${suffix}`] ?? null;
-      case "mom_pct":
-        return r[`mom_${suffix}`] ?? null;
-      case "cumulative_yoy_pct":
-        // No equal-weighted variant: averaging YTD percentages across members
-        // with different fiscal shapes is not a number that means anything.
-        return r.cum_yoy_weighted ?? null;
-      default:
-        return null;
-    }
-  };
-  // The basis has to describe the set THIS aggregation covered, not the set the
-  // other one would have. Only MoM's two sets differ: yoy_pct is non-null exactly
-  // when `revenue_month IS NOT NULL AND revenue_yoy_month > 0`, which is
-  // members_yoy's predicate verbatim, so AVG(yoy_pct) and the weighted YoY always
-  // cover the same members. mom_pct's extra fallback branch is the one asymmetry.
-  const membersFor = (r: any): number =>
-    metric === "mom_pct"
-      ? applied === "equal"
-        ? r.members_mom_equal
-        : r.members_mom
-      : metric === "cumulative_yoy_pct"
-        ? r.members_cum
-        : r.members_yoy;
-
-  return {
-    group,
-    metric,
-    agg: applied,
-    /** What the caller asked for. Differs from `agg` only when it could not be honoured. */
-    agg_requested: agg,
-    filters: f,
-    cells: rows.results.map((r: any) => ({
-      bucket: r.bucket,
-      month: r.month,
-      value: pick(r),
-      // The member count behind THIS metric, not behind the bucket as a whole.
-      members: membersFor(r),
-      members_with_revenue: r.members,
-      // Surfaced so a composition change is visible next to the number it moved,
-      // rather than quietly changing the denominator between two months.
-      composition_changed:
-        metric === "yoy_acceleration_ppt" && r.members_churned != null && r.members_churned > 0,
-      revenue: r.revenue,
-    })),
-  };
-}
-
-// ----------------------------------------------------------------- /company --
-
-async function companyDetail(env: Env, ticker: string) {
-  if (!TICKER_RE.test(ticker)) return { error: `not a ticker: ${ticker}` };
-
-  const [company, series, raw, history] = await env.DB.batch<any>([
-    env.DB.prepare(`SELECT * FROM universe WHERE ticker = ?`).bind(ticker),
-    env.DB.prepare(
-      `SELECT month, revenue_month AS revenue_twd_thousands, mom_pct, yoy_pct,
-              prior_month_yoy_pct, yoy_acceleration_ppt,
-              cum_revenue AS cumulative_ytd_revenue_twd_thousands,
-              cumulative_yoy_pct,
-              revenue_yoy_month, cum_revenue_prior,
-              reported_name, industry, note, source_id, market, has_data
-         FROM analytics_base WHERE ticker = ? ORDER BY month_idx`,
-    ).bind(ticker),
-    env.DB.prepare(
-      `SELECT * FROM raw_revenue WHERE ticker = ? ORDER BY month_idx, source_id`,
-    ).bind(ticker),
-    env.DB.prepare(
-      `SELECT * FROM raw_revenue_history WHERE ticker = ?
-        ORDER BY superseded_at_utc DESC LIMIT 50`,
-    ).bind(ticker),
-  ]);
-
-  if (!company.results.length) return { error: `unknown ticker ${ticker}` };
-
-  return {
-    company: company.results[0],
-    series: series.results,
-    raw_rows: raw.results,
-    // Restatements. Empty is the normal state; non-empty is the interesting one.
-    restatements: history.results,
-  };
-}
-
-// ----------------------------------------------------------------- /quality --
-
-/*
- * There is no cross-source-agreement query here any more, and adding one back
- * would produce an empty result by construction. The two OpenAPI feeds that
- * carry our universe are t187ap05_L (上市, 31 of the 37) and mopsfin_t187ap05_O
- * (上櫃, the other 5): a Taiwanese company is listed or OTC, never both, so the
- * feeds partition the universe rather than overlapping it. Verified live
- * 2026-08-25 - zero tickers appear in more than one feed. The MOPS repair pass
- * only runs for names the feeds MISSED, so it cannot create a second source
- * either. Two sources for one (ticker, month) would need a deliberate spot-check
- * fetch that does not exist yet.
- */
-async function quality(env: Env) {
-  const [coverage, gaps, findings, log] = await env.DB.batch<any>([
-    // The coverage matrix, straight off the grid the view already builds. The
-    // join to `universe` is for active_from/active_to, which analytics_base does
-    // not expose and which decide whether a cell was ever OWED a filing.
-    env.DB.prepare(
-      `SELECT b.ticker, b.display_name, b.bucket, b.tier, b.status, b.month,
-              b.has_data, b.source_id, u.active_from, u.active_to
-         FROM analytics_base b JOIN universe u USING (ticker)
-        ORDER BY b.sort_order, b.ticker, b.month_idx`,
-    ),
-    /*
-     * Interior gaps: a month with no data that has data SOMEWHERE before it and
-     * SOMEWHERE after it. Trailing absence is a pending filing and leading
-     * absence is a company that joined the window late; neither is a defect.
-     *
-     * This used to compare against LAG/LEAD by one month, which meant it only
-     * ever found a hole exactly one month wide. Two consecutive missing months
-     * disqualified each other - the first one's next month is empty, the second
-     * one's previous month is empty - so a longer outage, the worse failure,
-     * reported clean. Bounding against each ticker's first and last filed month
-     * instead makes the gap's length irrelevant.
-     */
-    env.DB.prepare(
-      `WITH r AS (
-         SELECT ticker,
-                MIN(CASE WHEN has_data = 1 THEN month_idx END) AS first_idx,
-                MAX(CASE WHEN has_data = 1 THEN month_idx END) AS last_idx
-           FROM analytics_base GROUP BY ticker
-       )
-       SELECT b.ticker, b.display_name, b.status, b.month
-         FROM analytics_base b JOIN r ON r.ticker = b.ticker
-        WHERE b.has_data = 0
-          AND b.month_idx > r.first_idx
-          AND b.month_idx < r.last_idx
-        ORDER BY b.ticker, b.month_idx`,
-    ),
-    env.DB.prepare(
-      `SELECT run_id, created_at_utc, severity, code, month, ticker, source_id, message
-         FROM quality_findings
-        ORDER BY CASE severity WHEN 'error' THEN 1 WHEN 'warn' THEN 2 ELSE 3 END,
-                 code, month, ticker
-        LIMIT 500`,
-    ),
-    env.DB.prepare(
-      `SELECT source_id, month, COUNT(*) AS fetches,
-              SUM(ok) AS ok_n, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS fail_n,
-              MAX(fetched_at_utc) AS last_fetch_utc
-         FROM fetch_log GROUP BY source_id, month ORDER BY month, source_id`,
-    ),
-  ]);
-
-  const cells = coverage.results;
-  const withData = cells.filter((c: any) => c.has_data === 1).length;
-
-  /**
-   * Was this company OWED a filing in this month?
-   *
-   * The basis for the coverage percentage, so getting it wrong reports absences
-   * that were never due as failures - which is how a reader is trained to
-   * ignore the number. 6286 is the standing case: merged, no obligation, and
-   * counting it would peg coverage at 97.3% forever.
-   *
-   * `status !== 'merged'` was too narrow. The schema's CHECK also permits
-   * 'delisted' and 'suspended', and universe.yaml's own editing rule is "to
-   * retire a name, set `status` and `active_to`" - so a delisted company counted
-   * as trackable for every month in the window, including the ones after it
-   * stopped existing.
-   *
-   * The window decides it, not the label: a month inside [active_from,
-   * active_to] was owed a filing whatever the company's status is TODAY, which
-   * is the point - status is a fact about now and coverage is a time series.
-   * A non-active company with no recorded window cannot be placed, so it is
-   * treated as never owing one, exactly as `merged` was.
-   */
-  const obligated = (c: any): boolean => {
-    if (c.active_from && c.month < c.active_from) return false;
-    if (c.active_to && c.month > c.active_to) return false;
-    return c.status === "active" || Boolean(c.active_to) || Boolean(c.active_from);
-  };
-  const trackable = cells.filter(obligated);
-  const trackableWithData = trackable.filter((c: any) => c.has_data === 1).length;
-
-  return {
-    coverage: {
-      cells: cells.length,
-      with_data: withData,
-      pct: cells.length ? round2((100 * withData) / cells.length) : null,
-      trackable_cells: trackable.length,
-      trackable_with_data: trackableWithData,
-      trackable_pct: trackable.length
-        ? round2((100 * trackableWithData) / trackable.length)
-        : null,
-      // Every absence that was not a failure, whatever made it so - a merger, a
-      // delisting, or a month outside the company's active window. Listing only
-      // the merged ones left a delisted name's absences unexplained.
-      known_absent: cells
-        .filter((c: any) => c.has_data === 0 && !obligated(c))
-        .map((c: any) => ({
-          ticker: c.ticker,
-          month: c.month,
-          status: c.status,
-          active_from: c.active_from ?? null,
-          active_to: c.active_to ?? null,
-        })),
-    },
-    matrix: cells,
-    interior_gaps: gaps.results,
-    findings: findings.results,
-    fetch_log: log.results,
-  };
-}
-
-// -------------------------------------------------------------- /export.csv --
-
-async function exportCsv(env: Env, url: URL): Promise<Response> {
-  const f = readFilters(url);
-  await assertFiltersMatchTheUniverse(env, f);
-  const { sql, binds } = whereFor(f, { prefix: "a" });
-  const rows = await env.DB.prepare(
-    `${TWELVE_COLUMN_SELECT} WHERE ${sql} ${TWELVE_COLUMN_ORDER}`,
-  )
-    .bind(...binds)
-    .all();
-
-  // Column order comes from the view, which is the brief's twelve columns in the
-  // specified order. The literal list is the header for an EMPTY result only -
-  // a CSV with no header row is worse than one with no data rows.
-  const columns = rows.results.length
-    ? Object.keys(rows.results[0] as object)
-    : [
-        "ticker", "company_name", "bucket", "tier", "month",
-        "revenue_twd_thousands", "mom_pct", "yoy_pct", "prior_month_yoy_pct",
-        "yoy_acceleration_ppt", "cumulative_ytd_revenue_twd_thousands",
-        "cumulative_yoy_pct",
-      ];
-
-  const lines = [columns.join(",")];
-  for (const row of rows.results as Record<string, unknown>[]) {
-    lines.push(columns.map((c) => csvCell(row[c])).join(","));
-  }
-
-  // The BOM is for Excel: without it, Excel reads UTF-8 CSV as the local
-  // codepage and mangles every Chinese company name.
-  const body = "﻿" + lines.join("\r\n") + "\r\n";
-  return new Response(body, {
-    headers: {
-      "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="taiwan-semicon-revenue_${f.from}_${f.to ?? "latest"}.csv"`,
-      "cache-control": "public, max-age=300",
-    },
-  });
-}
-
-/** Empty for null - NOT "0" and not "null". A blank cell reads as "no figure". */
-function csvCell(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  const text = String(value);
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-// ------------------------------------------------------------------ helpers --
-
-/** The ONLY place a placeholder list is built. Count in, `(?,?,?)` out. */
-function inClause(n: number): string {
-  return `(${new Array(n).fill("?").join(",")})`;
-}
-
-function list(value: string | null): string[] {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function month(value: string | null): string | null {
-  return value && MONTH_RE.test(value) ? value : null;
-}
-
-function dedupeInOrder<T>(values: T[]): T[] {
-  const seen = new Set<T>();
-  const out: T[] = [];
-  for (const v of values) {
-    if (!seen.has(v)) {
-      seen.add(v);
-      out.push(v);
-    }
-  }
-  return out;
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-function errText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-export function json(body: unknown, status = 200): Response {
+export function json(body: unknown, status = 200, extra: HeadersInit = {}): Response {
   return new Response(JSON.stringify(body, null, 2), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      // Monthly data. Five minutes is enough to absorb a dashboard's burst of
-      // parallel widget requests without making a fresh cron run invisible.
-      "cache-control": status === 200 ? "public, max-age=300" : "no-store",
+      // The published files are immutable for a deploy, but this endpoint
+      // reports freshness and must never be answered from a cache.
+      "cache-control": "no-store",
+      ...extra,
     },
   });
+}
+
+/** Every route that used to be answered out of D1, and where it went. */
+const RETIRED: Record<string, string> = {
+  "/api/meta": "/data/meta.json",
+  "/api/analytics": "/data/analytics.json",
+  "/api/heatmap": "/data/heatmap.json",
+  "/api/quality": "/data/quality.json",
+  "/api/company": "/data/company/<ticker>.json",
+  "/api/export.csv": "/data/export.csv",
+};
+
+function retiredFor(path: string): string | undefined {
+  if (RETIRED[path]) return RETIRED[path];
+  if (path.startsWith("/api/company/")) return RETIRED["/api/company"];
+  return undefined;
+}
+
+/**
+ * Liveness, read from the same bytes a reader gets.
+ *
+ * Deliberately NOT computed from anything this Worker holds in memory: the
+ * failure it exists to catch is a publish that did not happen or landed empty,
+ * and only reading the artefact can see that.
+ */
+async function health(env: Env): Promise<Response> {
+  const service = "taiwan-semicon-revenue-tracker";
+  if (!env.ASSETS) {
+    return json({ ok: false, service, error: "no assets binding" }, 503);
+  }
+  let meta: { months?: string[]; universe?: unknown[]; generated_at_utc?: string };
+  try {
+    const resp = await env.ASSETS.fetch(new Request("https://assets.local/data/meta.json"));
+    if (!resp.ok) {
+      return json({ ok: false, service, error: `meta.json: HTTP ${resp.status}` }, 503);
+    }
+    meta = await resp.json();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return json({ ok: false, service, error: `meta.json unreadable: ${detail}` }, 503);
+  }
+
+  const months = Array.isArray(meta.months) ? meta.months : [];
+  const universe = Array.isArray(meta.universe) ? meta.universe : [];
+  // An empty publish is a failure, not a quiet success. This is the whole
+  // reason the endpoint reads the file rather than reporting its own uptime.
+  if (!months.length || !universe.length) {
+    return json(
+      { ok: false, service, error: "published data is empty", months: months.length,
+        universe_n: universe.length },
+      503,
+    );
+  }
+  return json({
+    ok: true,
+    service,
+    data: {
+      source: "/data/meta.json",
+      universe_n: universe.length,
+      months: months.length,
+      latest_month: months[months.length - 1],
+      generated_at_utc: meta.generated_at_utc ?? null,
+    },
+  });
+}
+
+export async function handleApi(_request: Request, env: Env, path: string): Promise<Response> {
+  if (path === "/api/health") return health(env);
+
+  const replacement = retiredFor(path);
+  if (replacement) {
+    return json(
+      {
+        error: "endpoint retired",
+        detail:
+          "This dashboard no longer queries a database. The data is published as " +
+          "static files and filtered in the browser.",
+        path,
+        replacement,
+      },
+      410,
+    );
+  }
+  return json({ error: "not found", path }, 404);
 }

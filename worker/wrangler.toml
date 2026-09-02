@@ -28,10 +28,27 @@ account_id = "a441977d2344922f96303859b74754d8"
 [observability]
 enabled = true
 
-[[d1_databases]]
-binding = "DB"
-database_name = "taiwan-semicon-revenue"
-database_id = "da985a76-0e1a-4100-abd4-48c21687c290"
+# NO [[d1_databases]] BLOCK, DELIBERATELY.
+#
+# The dashboard left Cloudflare D1 on 2026-09-01, after D1's free-tier DAILY ROW
+# READ LIMIT was exceeded and every data endpoint began returning
+#
+#   D1_ERROR: Your account has exceeded D1's free tier daily row read limit.
+#
+# while /api/health went on reporting ok:true. The runbook had estimated ~2,600
+# page loads before that cap; whatever the real number was, it was reachable.
+#
+# Nothing about the data needed a hosted database. D1 IS Cloudflare's hosted
+# SQLite, and the analytics views, the migrations and the bucket-heatmap
+# statement all run unchanged against a plain SQLite file - which
+# ingest/tests/test_heatmap_sql.py had been doing in CI since the day it was
+# written. So the pipeline now builds that file on GitHub Actions, runs the same
+# SQL against it at publish time, and ships the answers as static JSON. There is
+# no database in the request path at all, and therefore no read limit to exceed.
+#
+# The store of record is data/pipeline.sqlite, built from worker/migrations/*.sql
+# by ingest/src/twrev/store.py. Those migrations are still the schema; they are
+# just applied to a file instead of to a Cloudflare service.
 
 # NO [triggers] BLOCK, DELIBERATELY.
 #
@@ -59,3 +76,10 @@ database_id = "da985a76-0e1a-4100-abd4-48c21687c290"
 [assets]
 directory = "public"
 binding = "ASSETS"
+# The published data must go through the access gate, and assets are otherwise
+# served BEFORE the Worker runs - so without this, /data/*.json would be
+# readable without a credential while /api/* had required one. That is a
+# regression the migration must not introduce silently: it is invisible today
+# only because the deployment is in `open` mode, and would become a live leak
+# the moment DASHBOARD_KEY is set.
+run_worker_first = ["/data/*"]

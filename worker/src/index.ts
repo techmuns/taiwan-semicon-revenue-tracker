@@ -1,5 +1,5 @@
 /**
- * Worker entrypoint: router, access gate, cron hook.
+ * Worker entrypoint: router, access gate, static assets.
  *
  * Route order is the contract:
  *
@@ -14,7 +14,6 @@
 
 import { checkAccess, clearSessionCookie, handleAuth, accessMode } from "./access";
 import { handleApi, json, type Env } from "./api";
-import { runRefresh } from "./cron";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -45,10 +44,18 @@ export default {
     // This sits ahead of the access gate on purpose. `/` is already served
     // without a credential by the asset server, so gating a deep link would
     // break bookmarks without protecting anything - the shell contains no
-    // figures, and every /api/* call it then makes goes through the gate below.
+    // figures, and every data request it then makes goes through the gate below.
+    //
+    // /data/ IS EXCLUDED HERE, and that exclusion is load-bearing. Those files
+    // are the figures. wrangler.toml routes them through this Worker
+    // (`run_worker_first`) precisely so the gate applies; letting the SPA
+    // branch answer them would serve index.html for a JSON request, and
+    // letting the asset server answer them would skip the credential check
+    // altogether - which is what /api/* never allowed.
     if (
       env.ASSETS &&
       !path.startsWith("/api/") &&
+      !path.startsWith("/data/") &&
       (request.method === "GET" || request.method === "HEAD")
     ) {
       return env.ASSETS.fetch(new Request(new URL("/index.html", url), request));
@@ -66,15 +73,22 @@ export default {
       return json({ error: "read-only API", method: request.method }, 405);
     }
 
+    // The published data, now that the gate has passed. Served from the assets
+    // binding rather than proxied to an origin: same bytes, one hop.
+    if (path.startsWith("/data/")) {
+      if (!env.ASSETS) return json({ error: "no assets binding", path }, 503);
+      return env.ASSETS.fetch(request);
+    }
+
     if (path.startsWith("/api/")) {
       try {
         return await handleApi(request, env, path);
       } catch (err) {
-        // A D1 error must not become an opaque 1101. The message names the query
-        // surface so a schema change is diagnosable from the response alone.
+        // Never an opaque 1101: the message names the surface that failed so a
+        // broken publish is diagnosable from the response alone.
         const message = err instanceof Error ? err.message : String(err);
         console.error(`api error path=${path}: ${message}`);
-        return json({ error: "query failed", path, detail: message }, 500);
+        return json({ error: "request failed", path, detail: message }, 500);
       }
     }
 
@@ -86,40 +100,18 @@ export default {
     });
   },
 
-  /**
-   * Monthly refresh.
-   *
-   * AWAITED, not ctx.waitUntil'd. There is no client waiting on a cron, so
-   * backgrounding buys nothing and costs the two things that matter: the
-   * runtime's own success/failure accounting (which is what the dashboard's cron
-   * history shows) and the guarantee that the work finishes before the
-   * invocation ends. A silent cron is the failure mode that takes a month to
-   * notice, so the error is logged with the expression that produced it and then
-   * re-thrown to mark the invocation failed.
-   */
-  /*
-   * NOTHING TRIGGERS THIS ANY MORE.
-   *
-   * wrangler.toml declares no [triggers] block: the account is at the Workers
-   * Free ceiling of five cron triggers per account, so this handler was never
-   * once registered and never once fired. The monthly refresh runs on GitHub
-   * Actions (.github/workflows/refresh.yml) and writes to the same D1 database
-   * through the API.
-   *
-   * The code is kept rather than deleted because it is tested and it is the
-   * fallback if a cron slot is ever freed - but adding the trigger back would
-   * then double-run the refresh against the Actions schedule, so read
-   * docs/RUNBOOK.md before doing it. It also still answers
-   * `wrangler dev --test-scheduled`, which is how it can be exercised locally.
-   */
-  async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    try {
-      await runRefresh(env, event.cron);
-    } catch (err) {
-      console.error(`cron ${event.cron} failed: ${err instanceof Error ? err.stack : err}`);
-      throw err;
-    }
-  },
+  // NO `scheduled` HANDLER. It went with Cloudflare D1.
+  //
+  // It could never have run anyway: the account sits at the Workers Free
+  // ceiling of five cron triggers PER ACCOUNT, so `wrangler deploy` reported
+  // code: 10072 and the handler was never registered - not once. That is why
+  // the refresh moved to GitHub Actions, which is where it still runs and the
+  // only place it should.
+  //
+  // With D1 gone it could not work even if a slot were freed: the refresh
+  // builds a SQLite file and publishes JSON, neither of which a Worker can do.
+  // Deleting it drops 866 lines of cron.ts that never executed in production
+  // and that a reader would reasonably have assumed were live.
 } satisfies ExportedHandler<Env>;
 
 // ------------------------------------------------------------------ helpers --
@@ -162,12 +154,16 @@ function landing(env: Env): string {
     "The dashboard assets are not deployed yet. The API is live:",
     "",
     "  GET /api/health          (always open)",
-    "  GET /api/meta",
-    "  GET /api/analytics?from=2026-01&to=2026-07",
-    "  GET /api/heatmap?metric=yoy_acceleration_ppt&group=bucket",
-    "  GET /api/company/2330",
-    "  GET /api/quality",
-    "  GET /api/export.csv",
+    "",
+    "  The data is published as static files, not queried from a database:",
+    "  GET /data/meta.json",
+    "  GET /data/analytics.json",
+    "  GET /data/heatmap.json",
+    "  GET /data/quality.json",
+    "  GET /data/company/2330.json",
+    "  GET /data/export.csv",
+    "",
+    "  The former /api/* data routes answer 410 with their replacement.",
     "",
     `access mode: ${mode}${mode === "open" ? "  <-- NO ACCESS CONTROL" : ""}`,
     "",
