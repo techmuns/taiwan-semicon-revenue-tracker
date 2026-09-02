@@ -104,6 +104,29 @@ export default function App() {
   // widget failed. Subscribed once here; see api.ts for why it is not per-widget.
   useEffect(() => onUnauthorized(() => setLocked(true)), []);
 
+  // The CSV href. Unfiltered it is the published file - one URL, cached,
+  // nothing built. Filtered it is a blob assembled from the rows already in
+  // memory, because there is no Worker query to run any more. The previous
+  // blob is revoked when the filters change or the page unmounts; without that
+  // every chip click leaks a copy of the dataset for the life of the tab.
+  const [exportHref, setExportHref] = useState<string>("/data/export.csv");
+  useEffect(() => {
+    let revoke: (() => void) | undefined;
+    let live = true;
+    void api.exportCsv(view.filters).then((r) => {
+      if (!live) {
+        r.revoke?.();
+        return;
+      }
+      revoke = r.revoke;
+      setExportHref(r.href);
+    });
+    return () => {
+      live = false;
+      revoke?.();
+    };
+  }, [view.filters]);
+
   useEffect(() => writeView(view), [view]);
   useEffect(() => {
     const on = () => setView(readView());
@@ -174,7 +197,7 @@ export default function App() {
         meta={meta.data}
         ticker={view.ticker}
         onClearTicker={() => setView((v) => ({ ...v, ticker: null }))}
-        exportHref={api.exportUrl(view.filters)}
+        exportHref={exportHref}
         onLock={() => {
           void api.logout().then(() => setLocked(true));
         }}

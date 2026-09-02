@@ -1,0 +1,4 @@
+﻿ticker,company_name,bucket,tier,month,revenue_twd_thousands,mom_pct,yoy_pct,prior_month_yoy_pct,yoy_acceleration_ppt,cumulative_ytd_revenue_twd_thousands,cumulative_yoy_pct
+2330,TSMC,AI Silicon,1,2026-07,467580548,11.02,44.69,,17,2872064238,37.01
+3661,"Alchip, Inc.",AI Silicon,1,2026-07,0,-100,,2.5,,,0
+3324,"Auras ""Tech""",Thermal,1,2026-07,1878969,3,31.8,28,3.8,11000000,25

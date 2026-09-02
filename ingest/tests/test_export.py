@@ -83,3 +83,37 @@ def test_js_number_matches_javascript_string_conversion(value, want):
     and diffs month to month. An integral float rendered as `17.0` where the
     Worker writes `17` made every month's export churn against the last."""
     assert export._js_number(value) == want
+
+
+def test_csv_fixture_is_identical_in_both_languages():
+    """The other half of a two-language byte contract.
+
+    web/fixtures/export-parity.csv is asserted by web/scripts/check-dataset.mjs
+    to equal what web/src/csv.ts produces. This asserts it also equals what this
+    module produces. Neither implementation can drift without one of the two
+    failing - which matters because the CSV is a documented deliverable that
+    somebody diffs month to month, and because these two HAVE diverged before:
+    Python wrote an integral float as "17.0" where JavaScript wrote "17", found
+    on 6147 / 2026-01.
+
+    If this fails after a deliberate format change, regenerate the fixture with
+    export.rows_to_csv and let the JS assertion re-verify the other side.
+    """
+    import json
+    from pathlib import Path
+
+    from twrev import export
+
+    fixtures = Path(__file__).resolve().parents[2] / "web" / "fixtures"
+    rows = json.loads((fixtures / "export-parity.json").read_text(encoding="utf-8"))
+    # newline="" or Python's universal-newline translation turns the file's
+    # CRLF into LF on the way in and the comparison fails for a reason that has
+    # nothing to do with either writer. Node's readFileSync does no such
+    # translation, which is why the JS side saw the bytes correctly and this
+    # side did not.
+    with open(fixtures / "export-parity.csv", encoding="utf-8", newline="") as fh:
+        expected = fh.read()
+    assert export.rows_to_csv(rows) == expected, (
+        "export.py and the committed fixture disagree. web/src/csv.ts is asserted "
+        "against that same fixture, so one of the two CSV writers has drifted."
+    )

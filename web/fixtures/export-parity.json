@@ -1,0 +1,44 @@
+[
+  {
+    "ticker": "2330",
+    "company_name": "TSMC",
+    "bucket": "AI Silicon",
+    "tier": 1,
+    "month": "2026-07",
+    "revenue_twd_thousands": 467580548,
+    "mom_pct": 11.02,
+    "yoy_pct": 44.69,
+    "prior_month_yoy_pct": null,
+    "yoy_acceleration_ppt": 17.0,
+    "cumulative_ytd_revenue_twd_thousands": 2872064238,
+    "cumulative_yoy_pct": 37.01
+  },
+  {
+    "ticker": "3661",
+    "company_name": "Alchip, Inc.",
+    "bucket": "AI Silicon",
+    "tier": 1,
+    "month": "2026-07",
+    "revenue_twd_thousands": 0,
+    "mom_pct": -100.0,
+    "yoy_pct": null,
+    "prior_month_yoy_pct": 2.5,
+    "yoy_acceleration_ppt": null,
+    "cumulative_ytd_revenue_twd_thousands": null,
+    "cumulative_yoy_pct": -0.0
+  },
+  {
+    "ticker": "3324",
+    "company_name": "Auras \"Tech\"",
+    "bucket": "Thermal",
+    "tier": 1,
+    "month": "2026-07",
+    "revenue_twd_thousands": 1878969,
+    "mom_pct": 3.0,
+    "yoy_pct": 31.8,
+    "prior_month_yoy_pct": 28.0,
+    "yoy_acceleration_ppt": 3.8,
+    "cumulative_ytd_revenue_twd_thousands": 11000000,
+    "cumulative_yoy_pct": 25.0
+  }
+]

@@ -229,16 +229,26 @@ def build_csv(conn: sqlite3.Connection) -> str:
     The BOM is not decoration: without it Excel reads UTF-8 CSV as the local
     codepage and mangles every Chinese company name.
     """
-    rows = _rows(conn, TWELVE_COLUMNS)
-    columns = list(rows[0].keys()) if rows else [
-        "ticker", "company_name", "bucket", "tier", "month",
-        "revenue_twd_thousands", "mom_pct", "yoy_pct", "prior_month_yoy_pct",
-        "yoy_acceleration_ppt", "cumulative_ytd_revenue_twd_thousands",
-        "cumulative_yoy_pct",
-    ]
+    return rows_to_csv(_rows(conn, TWELVE_COLUMNS))
+
+
+FALLBACK_COLUMNS = [
+    "ticker", "company_name", "bucket", "tier", "month",
+    "revenue_twd_thousands", "mom_pct", "yoy_pct", "prior_month_yoy_pct",
+    "yoy_acceleration_ppt", "cumulative_ytd_revenue_twd_thousands",
+    "cumulative_yoy_pct",
+]
+
+
+def rows_to_csv(rows: Sequence[dict[str, Any]]) -> str:
+    """The formatting, split out from the query so BOTH implementations of it -
+    this one and web/src/csv.ts, which now builds the filtered download in the
+    browser - can be diffed against the same fixture. Two languages writing one
+    documented deliverable is exactly where a silent divergence lives."""
+    columns = list(rows[0].keys()) if rows else list(FALLBACK_COLUMNS)
     buf = io.StringIO()
-    # QUOTE_MINIMAL with \r\n matches the Worker's csvCell(): quote only when
-    # the value contains a comma, quote or newline, and double an inner quote.
+    # QUOTE_MINIMAL with \r\n matches csvCell(): quote only when the value
+    # contains a comma, quote or newline, and double an inner quote.
     writer = csv.writer(buf, lineterminator="\r\n", quoting=csv.QUOTE_MINIMAL)
     writer.writerow(columns)
     for row in rows:

@@ -1,9 +1,17 @@
 /**
  * API client.
  *
+ * There is no longer an API. Cloudflare D1 is gone and every endpoint the
+ * Worker used to answer is a static file published by `twrev export`; this
+ * module keeps the shape the components already call so that none of them had
+ * to change, and delegates to ./dataset, which reads those files.
+ *
+ * What remains genuinely server-side is small and deliberate: /api/health, so
+ * an external monitor still has something that can go red, and /auth + /logout,
+ * because the session cookie is HttpOnly and only the Worker can set it.
+ *
  * Same origin as the Worker that serves this bundle, so there is no base URL to
- * configure and no CORS. In `vite dev` the proxy in vite.config.ts forwards /api
- * to the deployed Worker, so the dashboard develops against real data.
+ * configure and no CORS.
  *
  * Errors are thrown as `ApiError` with the status attached. Widgets render an
  * error state from it; nothing swallows a failure into an empty array, because
@@ -16,15 +24,9 @@
  * "unauthorized" error cards and no way to fix any of them.
  */
 
-import type {
-  AnalyticsResponse,
-  BucketHeatmap,
-  CompanyDetail,
-  HeatmapMetric,
-  Health,
-  Meta,
-  TickerHeatmap,
-} from "./types";
+import { csvObjectUrl } from "./csv";
+import * as dataset from "./dataset";
+import type { HeatmapMetric, Health } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -69,16 +71,10 @@ export function filterParams(f: FilterState): URLSearchParams {
 
 // -------------------------------------------------------------- 401 signal --
 
-const lockListeners = new Set<() => void>();
-
-/**
- * Subscribe to "the API says we have no credential". Returns an unsubscribe, so
- * it drops straight into a useEffect.
- */
-export function onUnauthorized(fn: () => void): () => void {
-  lockListeners.add(fn);
-  return () => lockListeners.delete(fn);
-}
+/** Re-exported so callers keep importing it from here. It lives in its own
+ *  module because ./dataset raises it too, and neither should import the other. */
+export { onUnauthorized } from "./unauthorized";
+import { reportUnauthorized } from "./unauthorized";
 
 async function get<T>(path: string): Promise<T> {
   let resp: Response;
@@ -88,7 +84,7 @@ async function get<T>(path: string): Promise<T> {
     // Network-level failure: no status to report.
     throw new ApiError(err instanceof Error ? err.message : "network error", 0, path);
   }
-  if (resp.status === 401) for (const fn of lockListeners) fn();
+  if (resp.status === 401) reportUnauthorized();
   if (!resp.ok) {
     let detail = `HTTP ${resp.status}`;
     try {
@@ -103,30 +99,45 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
+  /** Still the Worker's own, and still 503 on an empty publish - see
+   *  worker/src/index.ts. It is the one thing an uptime monitor can watch that
+   *  a reader's own browser cannot fake. */
   health: () => get<Health>("/api/health"),
-  meta: () => get<Meta>("/api/meta"),
 
-  analytics: (f: FilterState) => get<AnalyticsResponse>(`/api/analytics?${filterParams(f)}`),
+  meta: () => dataset.meta(),
 
-  bucketHeatmap: (f: FilterState, metric: HeatmapMetric, agg: "weighted" | "equal") => {
-    const p = filterParams(f);
-    p.set("metric", metric);
-    p.set("group", "bucket");
-    p.set("agg", agg);
-    return get<BucketHeatmap>(`/api/heatmap?${p}`);
+  analytics: (f: FilterState) => dataset.analytics(f),
+
+  bucketHeatmap: (f: FilterState, metric: HeatmapMetric, agg: "weighted" | "equal") =>
+    dataset.bucketHeatmap(f, metric, agg),
+
+  tickerHeatmap: (f: FilterState, metric: HeatmapMetric) => dataset.tickerHeatmap(f, metric),
+
+  company: (ticker: string) => dataset.company(ticker),
+
+  /**
+   * The CSV download.
+   *
+   * Unfiltered, this is the published file - one URL, cached, nothing built.
+   * Filtered, the Worker used to run the query; there is no Worker query any
+   * more, so the rows the page is already holding are turned into a blob here.
+   * Byte-identical to the published file either way: web/src/csv.ts and
+   * ingest/src/twrev/export.py:rows_to_csv are both asserted against
+   * web/fixtures/export-parity.csv.
+   *
+   * Returns a URL and, when it made one, the revoke that goes with it. Without
+   * revoking, every filter change would leak a copy of the dataset for the life
+   * of the tab.
+   */
+  exportCsv: async (f: FilterState): Promise<{ href: string; revoke?: () => void }> => {
+    const filtered =
+      Boolean(f.to) || f.buckets.length > 0 || f.tiers.length > 0 ||
+      f.tickers.length > 0 || f.onlyWithData || f.from !== EMPTY_FILTERS.from;
+    if (!filtered) return { href: "/data/export.csv" };
+    const { rows } = await dataset.analytics(f);
+    const href = csvObjectUrl(rows);
+    return { href, revoke: () => URL.revokeObjectURL(href) };
   },
-
-  tickerHeatmap: (f: FilterState, metric: HeatmapMetric) => {
-    const p = filterParams(f);
-    p.set("metric", metric);
-    p.set("group", "ticker");
-    return get<TickerHeatmap>(`/api/heatmap?${p}`);
-  },
-
-  company: (ticker: string) => get<CompanyDetail>(`/api/company/${encodeURIComponent(ticker)}`),
-
-  /** Not fetched - handed to the browser as a download. */
-  exportUrl: (f: FilterState) => `/api/export.csv?${filterParams(f)}`,
 
   /**
    * Exchange the shared key for the session cookie. POST, never a query string:

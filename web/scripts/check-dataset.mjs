@@ -13,7 +13,7 @@
  */
 
 import { build } from "esbuild";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -168,6 +168,48 @@ ok("agg is 'none' - there is nothing to aggregate", th.agg === "none");
 resetCache();
 const thF = await tickerHeatmap(F({ from: "2026-01", buckets: ["Thermal"] }), "yoy_pct");
 ok("filters apply to the projection", thF.cells.length === 1 && thF.cells[0].value === 12.3);
+
+// ---- the CSV byte contract, across two languages -------------------------
+let csvmod;
+{
+  const bundle = join(out, "csv.mjs");
+  await build({ entryPoints: [join(web, "src", "csv.ts")], bundle: true, format: "esm",
+                platform: "node", outfile: bundle, logLevel: "error" });
+  csvmod = await import(pathToFileURL(bundle).href);
+}
+const { toCsv, csvCell } = csvmod;
+
+group("csv.ts - quoting");
+ok("plain values are unquoted", csvCell("TSMC") === "TSMC");
+ok("null is empty, not the string 'null'", csvCell(null) === "");
+ok("undefined is empty", csvCell(undefined) === "");
+ok("a comma forces quotes", csvCell("Alchip, Inc.") === '"Alchip, Inc."');
+ok("an inner quote is doubled", csvCell('Auras "Tech"') === '"Auras ""Tech"""');
+ok("a newline forces quotes", csvCell("a\nb") === '"a\nb"');
+ok("a filed 0 is written as 0, not blank", csvCell(0) === "0");
+
+group("csv.ts - byte-identical to the Python exporter");
+// The fixture is produced by ingest/src/twrev/export.py:rows_to_csv. Two
+// implementations of one documented deliverable is exactly where a silent
+// divergence lives - the Python side already needed _js_number because it
+// wrote an integral float as "17.0" where JavaScript writes "17".
+const fixtureRows = JSON.parse(readFileSync(join(web, "fixtures", "export-parity.json"), "utf8"));
+const expected = readFileSync(join(web, "fixtures", "export-parity.csv"), "utf8");
+const actual = toCsv(fixtureRows);
+ok("toCsv matches export.py byte for byte", actual === expected,
+   actual === expected ? `(${Buffer.byteLength(actual)} bytes)` : "");
+if (actual !== expected) {
+  for (let i = 0; i < Math.max(actual.length, expected.length); i++) {
+    if (actual[i] !== expected[i]) {
+      console.log(`     first difference at ${i}: js=${JSON.stringify(actual.slice(i, i + 40))}`);
+      console.log(`                             py=${JSON.stringify(expected.slice(i, i + 40))}`);
+      break;
+    }
+  }
+}
+ok("starts with a UTF-8 BOM (or Excel mangles the Chinese names)", actual.charCodeAt(0) === 0xfeff);
+ok("CRLF line endings", actual.includes("\r\n") && !/[^\r]\n/.test(actual));
+ok("an integral float is '17', never '17.0'", actual.includes(",17,"));
 
 rmSync(out, { recursive: true, force: true });
 console.log(failures ? `\n${failures} FAILED` : "\ndataset.ts OK - all assertions passed");

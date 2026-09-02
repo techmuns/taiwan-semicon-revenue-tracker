@@ -27,7 +27,8 @@
  * wrong too.
  */
 
-import type { FilterState } from "./api";
+import { ApiError, type FilterState } from "./api";
+import { reportUnauthorized } from "./unauthorized";
 import type {
   AnalyticsResponse,
   AnalyticsRow,
@@ -52,7 +53,11 @@ function load<T>(name: string): Promise<T> {
   if (!hit) {
     hit = fetch(`${DATA}/${name}`, { headers: { accept: "application/json" } }).then(
       async (r) => {
-        if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
+        // The published files sit behind the same access gate as the old API,
+        // so a missing or stale cookie fails here exactly as it used to fail
+        // on /api/*. Publish it once for the whole dashboard.
+        if (r.status === 401) reportUnauthorized();
+        if (!r.ok) throw new ApiError(`HTTP ${r.status}`, r.status, `${DATA}/${name}`);
         return r.json();
       },
     );
