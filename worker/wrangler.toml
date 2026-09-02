@@ -59,9 +59,9 @@ enabled = true
 # again now.
 #
 # The refresh runs on GitHub Actions instead (.github/workflows/refresh.yml),
-# on the same 11/14/18 cadence, and writes to this same D1 database through the
-# API. D1 is untouched by that move and stays the store of record; only the
-# schedule left Cloudflare.
+# on the same 11/14/18 cadence. It writes a SQLite file, publishes JSON, and
+# holds no Cloudflare credential at all - deploy.yml, a separate job, is what
+# ships the result. Neither one could reach D1 if it tried.
 #
 # Re-adding a trigger here would fail the same way, and would double-run the
 # refresh if the account ever freed a slot.

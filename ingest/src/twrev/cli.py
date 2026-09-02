@@ -798,7 +798,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--force-refetch", action="store_true")
     sp.set_defaults(func=cmd_verify)
 
-    sp = sub.add_parser("seed", help="emit D1 seed SQL from the cache")
+    sp = sub.add_parser("seed", help="emit seed SQL for the store, from the cache")
     common(sp)
     sp.add_argument("--out", default=None)
     sp.add_argument("--force", action="store_true",

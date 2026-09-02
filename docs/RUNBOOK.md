@@ -70,10 +70,12 @@ PYTHONPATH=ingest/src python -m twrev.cli export \
 
 ### What moved, and what did not
 
-**The schedule moved. The database did not.** D1 remains the store of record,
-the Worker still answers every endpoint out of it, and the dashboard is
-untouched — including the bucket-heatmap SQL, which stays where it is and keeps
-running in the engine that already runs it correctly.
+**The schedule moved first; the database followed a month later.** D1 is gone:
+its free-tier daily row read limit was exceeded on 2026-09-01. What did *not*
+change is the SQL. D1 is Cloudflare's hosted SQLite, so the migrations, the
+`analytics_monthly` view and the bucket-heatmap statement all run unaltered
+against `data/pipeline.sqlite` — the heatmap is still computed by that same
+statement, just at publish time instead of per request.
 
 ### Why the Cloudflare cron had to go
 
@@ -87,11 +89,12 @@ This account has reached the Workers Free limit of 5 cron triggers per account.
 
 The scheduled handler was therefore never registered and not one refresh ever
 fired. `wrangler.toml` now declares no `[triggers]` block at all, so deploys are
-clean again; `worker/src/index.ts` still carries the handler, marked dead, as
-the fallback if a slot is ever freed. **Do not re-add the trigger without
-disabling the Actions schedule** — they would double-run.
+clean again. The `scheduled` handler is gone from `worker/src/index.ts` too —
+it could not work now even if a slot were freed, because the refresh builds a
+SQLite file and commits JSON, neither of which a Worker can do. **Do not re-add
+the trigger.**
 
-### D1's limits were never the problem
+### D1's write and storage limits were never close; the read limit is what bit
 
 Worth writing down so nobody re-litigates it. Measured against the real store:
 
@@ -101,7 +104,11 @@ Worth writing down so nobody re-litigates it. Measured against the real store:
 | Reads | ~1,900 rows/page load | 5,000,000/day | ~2,600 page loads/day |
 | Storage | 200 KB | 5 GB | 0.004% |
 
-What was exhausted was a quota on *scheduled jobs*. Nothing about the database.
+Two different quotas ran out, four weeks apart. The first was a quota on
+*scheduled jobs* — the 5-cron ceiling above, nothing to do with the database.
+The second was the **reads** row of this table: ~2,600 page loads a day is a
+real number, and on 2026-09-01 a backfill loop reached it and took every data
+endpoint down. Writes and storage never mattered; the read limit did.
 
 ### Actions is also the better host for the scrape
 
@@ -124,16 +131,19 @@ disagreement raises `SOURCE_DISAGREEMENT`, which reaches the reader through
 1. **Scrape** — MOPS for all 36 trackable names, plus one explicit retry pass
    over cells that exhausted their attempts.
 2. **Cross-source** — every cell compared against the OpenAPI feeds.
-3. **Local view** — the seed's rows are loaded into a scratch SQLite built from
-   the real migrations, so `analytics_monthly` is *executed* and its 12-column
-   contract asserted before anything reaches D1.
+3. **View** — the rows are written into `data/pipeline.sqlite`, built from the
+   real migrations, so `analytics_monthly` is *executed* and its 12-column
+   contract asserted.
 4. **Golden checks** — units, ticker types, column completeness, `month_idx`
    agreement, and the `2330/2026-03 = 415,191,699` reference cell.
-5. **Apply** — `wrangler d1 execute --remote`.
-6. **Verify live** — `ingest/tools/verify_live.py` reads back through the public
-   API, not the database, because that is the reader's own path.
+5. **Publish** — `twrev.cli export` runs the same SQL, including the
+   bucket-heatmap statement, and writes `web/public/data/*.json`.
+6. **Commit, then deploy** — refresh commits the JSONL state and the published
+   files, then dispatches `deploy.yml`, which holds the Cloudflare token and
+   verifies the served bundle is the one it just built.
 
-A failure at 1–4 writes nothing.
+A failure at 1–5 commits nothing: the JSONL state is written back only after the
+gates pass, so a bad run cannot overwrite good state.
 
 ### What fails the run, and what does not
 
@@ -166,50 +176,61 @@ runners are fine. Those headers are load-bearing.
 It also serves a block page on first contact and the real page on retry, so
 expect `rejected` in the fetcher stats to run at roughly one per cell.
 
-### The secret
+### The secret — refresh has none
 
-`CLOUDFLARE_API_TOKEN`, a repository secret, from the account that owns the
-Worker (`a441977d…`) and with **D1 edit** permission. The workflow checks it is
-present and fails immediately with a clear message rather than surfacing an
-authentication error twenty minutes in.
+`refresh.yml` holds **no Cloudflare credential at all**, deliberately. Static
+assets ship only inside a `wrangler deploy`, so the token that publishes can
+replace the entire Worker, access gate included — strictly more power than the
+D1-edit token it replaces, and not something an unattended scheduled scrape
+should hold. So refresh commits and dispatches; `deploy.yml` is the only
+workflow with `CLOUDFLARE_API_TOKEN`, a repository secret from the account that
+owns the Worker (`a441977d…`).
 
 ### GitHub disables schedules after 60 days of repo inactivity
 
 A real hazard for a monthly job on a quiet repo: the workflow silently stops
 firing. `workflow_dispatch` is the escape hatch, and any push resets the clock.
 
-### Expect two restatements on the first Actions refresh
+### The two restatements already happened
 
-`3661` and `6415` file their 備註 note in the layout `RE_NOTE_KY` handles, which
-was added in `a976750` — *after* the current D1 rows were seeded. The live rows
-carry `note = NULL`; the refreshed rows carry the real text, which changes
-`row_hash` and trips the restatement trigger.
+`3661` and `6415` file their 備註 note in the layout `RE_NOTE_KY` handles, added
+in `a976750` — *after* the rows then in D1 were seeded. Those rows carried
+`note = NULL`, so the first Actions refresh changed `row_hash` on both and
+tripped the restatement trigger. That is the parser fix landing, **not** a filer
+revision, and the two rows it produced are the whole of
+`data/raw/raw_revenue_history.jsonl`. It happened once and will not repeat.
 
-Verified: 34 of 36 company-months are byte-identical to D1 including `row_hash`;
-the two that differ, differ only in `note` and its hash, and the note is
-genuinely present in the MOPS bytes. This is the parser fix landing, **not** a
-filer revision. It happens once.
+Verified at the time: 34 of 36 company-months byte-identical to D1 including
+`row_hash`; the two that differed, differed only in `note` and its hash.
 
-### There is also a static export, currently unused
+### The static export is the product now
 
 `twrev.cli export` writes the whole dashboard as files under `web/public/data`,
-and `ingest/tools/check_export_parity.py` proves it matches the live API exactly
-(analytics, meta, seven companies, and the CSV byte for byte — zero
-divergences). Nothing reads those files: the dashboard still calls the API.
+and `ingest/tools/check_export_parity.py` proved it matched the live API exactly
+before the cutover (analytics, meta, seven companies, and the CSV byte for byte
+— zero divergences). The dashboard reads those files and nothing else.
 
-It is kept because it is the head start if this ever needs to leave Cloudflare
-entirely. Doing that would also require porting the bucket-heatmap aggregation
-into the browser, which is the one thing that cannot become a file — it
-aggregates over whatever filters are live, and ticker selection is an arbitrary
-subset of 37 names.
+The one thing that could not simply become a file was the bucket-heatmap
+aggregation: it runs over whatever filters are live, and ticker selection is an
+arbitrary subset of 37 names. It is not aggregated in the browser either. The
+UI exposes no ticker control for that view, so the reachable cells are
+enumerable — `export` runs the original statement, unchanged and character for
+character, out of `ingest/src/twrev/sql/heatmap_bucket.sql`, and publishes every
+one of them.
 
 ---
 
 ## Access
 
 The posture is **derived from which secrets are set**, never hardcoded, and the
-running service states it — `/api/meta` reports `access.mode`, and a 401 carries an
-`X-Access-Mode` header. Most specific wins (`worker/src/access.ts`):
+running service states it — `/api/health` reports `access.mode`, and a 401
+carries an `X-Access-Mode` header. Most specific wins (`worker/src/access.ts`):
+
+**Read the posture from `/api/health`, never from `/data/meta.json`.** That file
+carries an `access` block too, but it is written by the exporter on a GitHub
+runner that cannot see the Worker's secrets, so it is frozen at `open` and would
+report `open` for a fully gated deployment. Health is evaluated live, and is the
+one route that answers without a credential.
 
 | Mode | Set | Behaviour |
 |---|---|---|
@@ -224,12 +245,14 @@ because the tracker is to work without a credential. Check the posture at any ti
 without one:
 
 ```bash
-curl -s https://taiwan-semicon-revenue.tech-441.workers.dev/api/meta | grep -o '"mode":"[a-z-]*"'
+curl -s https://taiwan-semicon-revenue.tech-441.workers.dev/api/health | grep -o '"mode": *"[a-z-]*"'
 ```
 
 The dashboard states it too: the header shows an amber **open access** chip whenever
-`/api/meta` reports `public: true`, which exists so that "we left it public and
-forgot" cannot be the silent state.
+`/api/health` reports `public: true`, which exists so that "we left it public and
+forgot" cannot be the silent state. The chip itself was removed at the owner's
+request; the Lock button in the header is what remains, and it appears exactly
+when health reports `secret`.
 
 ### Turning a key back on
 
@@ -264,12 +287,12 @@ A secret change deploys a new Worker version by itself. It does **not** need a
 a `Source: Secret Change` entry in `wrangler deployments list` is how a posture flip
 shows up in the deploy history.
 
-**The five-minute lag.** Successful `/api/*` responses are `max-age=300`, so turning
-a key on does not lock an open tab out immediately: it keeps serving cached 200s
-until they expire, and the first thing to 401 is a route that tab had never fetched.
-A 401 itself is `no-store`, so nothing caches the rejection. This is exactly how the
-2026-08-21 flip surfaced — as a lone `/api/company/5347 · HTTP 401` on a dashboard
-whose other tabs still looked fine.
+**The lag.** Turning a key on does not lock an open tab out immediately: cached
+`/data/*` responses keep serving 200s until they expire, and the first thing to
+401 is a file that tab had never fetched. A 401 itself is `no-store`, so nothing
+caches the rejection. This is exactly how the 2026-08-21 flip surfaced — as a
+lone `/api/company/5347 · HTTP 401` on a dashboard whose other tabs still looked
+fine. The same shape applies to the files that replaced those routes.
 
 ### Why not Cloudflare Access
 
@@ -303,7 +326,7 @@ figures.
 5. Falls back to the per-company MOPS endpoint for any tier-1 ticker still
    missing.
 6. Writes `quality_findings`. Anything at `error` or `warn` reaches the reader
-   automatically: `/api/meta.alerts.severe_findings` carries it and `AlertStrip`
+   automatically: `meta.alerts.severe_findings` carries it and `AlertStrip`
    draws it above the content on every tab. `info` findings stay out of the UI —
    each one is already stated in `universe.notes` on the company it concerns.
 
@@ -337,7 +360,7 @@ Other CLI subcommands:
 | `backfill --from --to [--tickers] [--offline]` | Fetch + parse a window into `ingest/cache/`. |
 | `report` | Re-parse the cache offline and summarise. Free — no network. |
 | `verify --month 2026-07` | Cross-check the MOPS scrape against the `_P`/`_L`/`_O` feeds. |
-| `seed --from --to --out out/seed.sql` | Emit D1 SQL from the cache. The window is required, and scopes the idempotent DELETEs. |
+| `seed --from --to --out out/seed.sql` | Emit seed SQL from the cache, applied with `sqlite3 data/pipeline.sqlite < …`. The window is required, and scopes the idempotent DELETEs. |
 | `show --ticker 2330` | Print one ticker's series from the cache. |
 
 `ingest/cache/` holds the raw fetched bytes and is the real audit artifact. It is
@@ -353,8 +376,9 @@ so the test suite provably cannot reach the network.
 ## Universe changes
 
 `config/universe.yaml` is the single source of truth for bucket, tier, and
-lifecycle. It is mirrored into the D1 `universe` table at seed time, so the
-Worker and the dashboard read the same values.
+lifecycle. It is mirrored into the store's `universe` table at seed time and
+read from there by every export, so the SQL and the dashboard read the same
+values.
 
 A delisting, merger, or suspension is a `status` / `active_to` edit — **never a
 code change**:
@@ -445,14 +469,16 @@ cd ingest && PYTHONPATH=src python -m twrev.cli validate --write
 Commit the YAML **and** the two generated files
 (`web/src/generated/relationships.ts`, `worker/src/generated/relationships.ts`).
 
-### Why this is generated TypeScript and not a D1 column
+### Why this is generated TypeScript and not a database column
 
 A `consolidated_into` column on `universe` would be the obvious design and is
-the wrong one here. Migrations are applied **by hand, outside CI**, while the
-monthly refresh is automated — and the seed applies as a **single transaction**.
-A seed referencing a column D1 did not have yet would abort the whole month's
-revenue update, turning a cosmetic ordering problem into a missed filing month.
-A build-time constant compiled into both bundles cannot fail that way.
+the wrong one here. The seed applies as a **single transaction**, so a seed
+referencing a column the schema does not have yet aborts the whole month's
+revenue update — turning a cosmetic ordering problem into a missed filing month.
+That was sharper when migrations were applied by hand to a remote D1 and could
+lag the code; the store is now rebuilt from `worker/migrations/*.sql` on every
+run, so the two cannot drift. The build-time constant stays regardless: the
+value is read by the browser bundle, which has no database to ask.
 
 ### Supply links
 
@@ -557,7 +583,8 @@ yields `None` and writes no row at all. So a NULL-revenue `mops_company` row
 does not exist; the live store has 288 raw rows and zero with a NULL revenue.
 If the ingest is ever changed to persist a placeholder row, add
 `CASE WHEN revenue_month IS NULL THEN 1 ELSE 0 END` ahead of the source rank -
-and note that is a view migration, applied to D1 by hand.
+and note that is a view migration: edit `worker/migrations/*.sql`, which the
+next run applies to a freshly built store.
 
 **The source-precedence CASE is a hardcoded list.** It is, and migration 0002's
 own comment says it must never drift from `config/sources.yaml`. It is now
@@ -565,8 +592,7 @@ CHECKED rather than fixed in SQL: `twrev validate` parses the CASE out of
 `0001_init.sql` and asserts it names exactly the YAML's sources in the same
 order, so a config edit that needs a matching SQL edit fails CI before either
 reaches production. Making the view read `source_feed` instead would need a
-migration, and a schema the tests have and D1 does not is a worse failure than
-the drift it would prevent.
+migration, and the check is cheaper than the migration it would replace.
 
 ---
 
@@ -620,14 +646,19 @@ existing Worker rather than erroring:
 npx wrangler deployments list --cwd worker
 ```
 
-Then confirm the deploy actually landed — `/api/*` is cached for five minutes,
-so use curl rather than the browser:
+Then confirm the deploy actually landed. The data ships *inside* the deploy, so
+this checks the published files, not just the code:
 
 ```bash
 B=https://taiwan-semicon-revenue.tech-441.workers.dev
-curl -s -o /dev/null -w 'invalid filter -> %{http_code} (want 400)\n' "$B/api/analytics?tickers=2330.TW&from=2026-07"
-curl -s -o /dev/null -w 'unknown ticker -> %{http_code} (want 404)\n' "$B/api/company/2338"
+curl -s "$B/api/health"                                                    # ok:true, latest_month, universe_n
+curl -s -o /dev/null -w 'analytics -> %{http_code} (want 200)\n' "$B/data/analytics.json"
+curl -s -o /dev/null -w 'heatmap   -> %{http_code} (want 200)\n' "$B/data/heatmap.json"
+curl -s -o /dev/null -w 'retired   -> %{http_code} (want 410)\n' "$B/api/analytics"
 ```
+
+`/api/health` 503s when `meta.json` is missing or empty, so a deploy that shipped
+code without data fails this check rather than showing empty cards.
 
 `npx wrangler rollback` reverts to the previous version if anything looks wrong.
 
@@ -733,7 +764,7 @@ misread.
   currency; the TWD column is taken. Their *levels* are therefore not directly
   comparable with the standalone filers. Raised as `CONSOLIDATED_BASIS` info
   findings, once per company-month. The UI reads those findings back through
-  `/api/meta.alerts.consolidated` and footnotes the two places a level is
+  `meta.alerts.consolidated` and footnotes the two places a level is
   actually summed - the Summary revenue tile and the Data table - rather than
   listing them, so it is impossible to quote a level without having been told.
   The list is derived from the findings, not hardcoded, so a third such filer
@@ -749,7 +780,7 @@ Recorded so the divergence is traceable rather than looking like an oversight.
 |---|---|
 | Munshot Dashboard SDK | There is no Munshot host. This is a standalone Worker on its own URL, not an iframe embed. |
 | Host-owned auth | Auth is Cloudflare Access or a Worker-level shared key. There is no host to own it. |
-| "Registered datasources only" | The datasource is this project's own D1. |
+| "Registered datasources only" | The datasource is this project's own published JSON, built by its own pipeline. |
 
 The skill's *structural* standards are followed as written: 3-zone shell, 48px
 sticky header, `WidgetCard` for every data widget, `repeat(auto-fill,
@@ -869,37 +900,48 @@ node web/scripts/check-theme-parity.mjs
 
 All read-only. `GET` only; anything else returns 405.
 
+There are two Worker routes left. Everything else is a file.
+
 | Route | Notes |
 |---|---|
-| `/api/health` | Always open. Row counts and the D1 binding. |
-| `/api/meta` | Universe, buckets, tiers, month range, freshness, access posture. |
-| `/api/analytics?from&to&tickers&buckets&tiers&only_with_data` | The twelve columns, in spec order. |
-| `/api/heatmap?metric&group=bucket\|ticker&agg=weighted\|equal` | Aggregated cells. |
-| `/api/company/:ticker` | Full series, raw rows, restatements. |
-| `/api/quality` | Coverage matrix, findings, fetch log. **Operator-only — no UI reader.** Kept because this table is the record when a cron run looks wrong, and the post-deploy check below curls it. What a reader needs from it rides on `/api/meta.alerts` instead. |
-| `/api/export.csv?…` | The twelve columns with a UTF-8 BOM so Excel opens it correctly. |
+| `/api/health` | Always open. Reads the published `/data/meta.json` through the assets binding and 503s if it is missing or empty — a publish check, not a liveness ping. It touches no database. |
+| `/auth`, `/logout` | The access gate. |
+| every former `/api/*` data route | **410 Gone**, naming its replacement file in the body. 410 rather than 404: a 404 says "wrong URL" and invites a retry. |
 
-Responses carry `Cache-Control: public, max-age=300`. The data changes monthly,
-so this is nearly free — but it does mean **a redeploy is not visible in a
-browser for up to five minutes**. When verifying a fix, bypass it:
+The data itself, published by `twrev.cli export` and served through the gate
+(`run_worker_first = ["/data/*"]` in `wrangler.toml`, so the credential check
+still applies):
+
+| File | Was |
+|---|---|
+| `/data/meta.json` | `/api/meta` |
+| `/data/analytics.json` | `/api/analytics` — all rows, unfiltered; filtering is `web/src/dataset.ts` |
+| `/data/heatmap.json` | `/api/heatmap` — every reachable cell, precomputed |
+| `/data/company/<ticker>.json` | `/api/company/:ticker` |
+| `/data/quality.json` | `/api/quality` |
+| `/data/export.csv` | `/api/export.csv` — UTF-8 BOM so Excel opens it correctly |
+
+Responses are cached. The data changes monthly, so this is nearly free — but it
+does mean **a redeploy is not visible in a browser immediately**. When verifying
+a fix, bypass it:
 
 ```bash
-curl -s "https://taiwan-semicon-revenue.tech-441.workers.dev/api/heatmap?metric=yoy_acceleration_ppt&group=bucket&from=2026-01"
+curl -s "https://taiwan-semicon-revenue.tech-441.workers.dev/data/heatmap.json" | head -c 300
 ```
 
 `fetch(url, {cache: 'reload'})` from the page console does the same and also
 refreshes the browser's entry, so a subsequent reload of the app shows the new
-values. Note the cache key is the **exact URL including parameter order** — the
-SPA sends `?from=…&metric=…&group=…&agg=…`, so a hand-built URL with the
-parameters in a different order is a different entry and will look fresh while
-the app still shows stale numbers.
+values. The URLs are now fixed file paths rather than parameterised queries, so
+the old trap — a hand-built URL whose parameters were in a different order being
+a different cache entry, looking fresh while the app showed stale numbers — no
+longer applies.
 
 ---
 
 ## Verification gates
 
 The golden-number checks are the important ones. Both reproduce in Python, in
-D1, and in the dashboard.
+`data/pipeline.sqlite`, and in the dashboard.
 
 **2330 / 2026-03**, from the per-company MOPS endpoint:
 
@@ -937,8 +979,8 @@ Then:
 
 ```bash
 python -m twrev.cli verify --month 2026-07     # zero SOURCE_DISAGREEMENT findings
-curl -s .../api/export.csv | head -1           # exact 12-column order
-curl -s .../api/quality                        # 288 of 288 expected cells; 8 known-absent (6286)
+curl -s .../data/export.csv | head -1          # exact 12-column order
+curl -s .../data/quality.json                  # 288 of 288 expected cells; 8 known-absent (6286)
 ```
 
 Coverage as of the 2025-12 → 2026-07 backfill: **288 of 288** expected

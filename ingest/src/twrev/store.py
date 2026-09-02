@@ -1,11 +1,18 @@
-"""Local SQLite harness - runs the real D1 migration against a local database.
+"""The store: applies worker/migrations/*.sql to a SQLite file.
 
-The metric logic lives in `analytics_monthly`, a view. The only cheap way to test
-a view is to execute it, so the identical migration SQL is applied here and the
-same queries are run. Local SQLite 3.45 and D1 both support everything used, and
-the migration is deliberately written to avoid engine-specific constructs.
+The metric logic lives in `analytics_monthly`, a view, so the only way to check
+it is to execute it - which is why this module existed from the start, as a
+harness that ran the real migrations against a local database.
 
-This is a verification tool, not a production store. D1 remains the store of record.
+It is no longer a harness. When the dashboard left Cloudflare D1 the migrations
+did not change; they are simply applied to a file now instead of to a service.
+D1 *is* hosted SQLite, so this was a rehost, not a port: the same schema, the
+same view, the same bucket-heatmap statement, and 2,590 analytics values that
+matched the live D1 answers with zero divergences before the cutover.
+
+The database this builds is a rebuildable artifact, not the durable state. The
+durable state is `data/raw/*.jsonl` (see cli.py); the file is reconstructed from
+it on every run.
 """
 
 from __future__ import annotations

@@ -1,19 +1,23 @@
 # Monthly revenue refresh.
 #
-# THE SCHEDULE MOVED TO GITHUB; THE DATABASE DID NOT.
+# THE SCHEDULE MOVED FIRST; THEN THE DATABASE FOLLOWED.
 #
-# D1 is still the store of record and the Worker still answers every endpoint
-# out of it. What moved here is deciding when to run and doing the scraping,
-# because the Cloudflare account sits at the Workers Free ceiling of five cron
-# triggers per account - `wrangler deploy` reported `code: 10072`, the Worker's
-# scheduled handler was never registered, and not one refresh ever fired.
+# The schedule moved because the Cloudflare account sits at the Workers Free
+# ceiling of five cron triggers per account - `wrangler deploy` reported
+# `code: 10072`, the Worker's scheduled handler was never registered, and not
+# one refresh ever fired.
 #
-# D1's own limits were never close to the problem, and it is worth writing the
-# numbers down so nobody re-litigates this later. Measured against the real
-# store: one run writes about 100 rows against an allowance of 100,000 a day
-# (0.3% of a single day's budget, per month); a dashboard page load reads about
-# 1,900 rows against 5,000,000 a day, roughly 2,600 page loads before the cap;
-# storage is 200 KB of 5 GB. What was exhausted was a quota on scheduled jobs.
+# The database moved for a different reason, a month later: on 2026-09-01 D1's
+# free-tier DAILY ROW READ LIMIT was exceeded and every data endpoint began
+# returning D1_ERROR while /api/health went on reporting ok:true. The estimate
+# that had made that look safe - ~1,900 rows read per page load against
+# 5,000,000 a day, so ~2,600 page loads - was reachable, and a backfill loop
+# reached it. So there is no database in the request path any more.
+#
+# This job is now the whole pipeline: it scrapes, builds data/pipeline.sqlite
+# from worker/migrations/*.sql, runs the analytics and heatmap SQL against that
+# file, and commits the answers as static JSON. Nothing here talks to D1, and
+# no credential in this workflow could.
 #
 # Actions is also the better host for the scrape on its merits. The Worker had a
 # subrequest budget, which is why its repair path fetched MOPS for tier-1 names

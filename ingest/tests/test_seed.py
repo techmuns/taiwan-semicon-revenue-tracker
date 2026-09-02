@@ -1,6 +1,6 @@
-"""Tests for the generated D1 seed file.
+"""Tests for the generated seed file.
 
-The seed is the one artifact applied to remote D1 by hand, so it gets the
+The seed is the one artifact applied to the store by hand, so it gets the
 strictest test in the suite: the generated SQL is *executed* against a database
 built from the real migration, and the resulting analytics_monthly output is
 compared against the parameterised write path row for row. That is what licenses
@@ -90,7 +90,11 @@ def view_dump(conn: sqlite3.Connection) -> list[tuple]:
 
 
 def test_no_explicit_transaction(report):
-    """D1 rejects BEGIN/COMMIT; emitting one would fail the entire apply."""
+    """Kept transaction-free so any applying engine supplies its own.
+
+    D1 rejected BEGIN/COMMIT outright and would fail the entire apply; sqlite3
+    tolerates it, but a seed with no transaction of its own applies under both.
+    """
     sql = seed.build(universe=load_universe(), report=report).upper()
     assert "BEGIN TRANSACTION" not in sql
     assert "\nBEGIN" not in sql

@@ -46,7 +46,7 @@ config/sources.yaml       endpoint URLs + ongoing-source precedence
 config/relationships.yaml who contains whom - drives de-duplication of totals
 config/segments.yaml      named slices of the universe, e.g. the HPC pilot
 ingest/                   Python 3.12 - backfill, monthly refresh, config checks
-worker/                   Cloudflare Worker - JSON API over D1, static assets
+worker/                   Cloudflare Worker - access gate + static assets, no database
 web/                      React + Vite + TS dashboard, built into worker/public
 docs/RUNBOOK.md           operations, open items, how to read the numbers
 docs/SEGMENT_PILOT.md     how to add a themed slice, and what its number means
@@ -226,10 +226,12 @@ Effective on the next request, no deploy. See [Access](docs/RUNBOOK.md#access).
 The monthly refresh runs on **GitHub Actions**, not on a Cloudflare cron. The
 account is at the Workers Free ceiling of 5 cron triggers *per account*, so the
 Worker's schedule never registered and not one refresh ever fired; Actions has
-no such cap. **D1 is unchanged** — it is still the store of record, the Worker
-still answers every endpoint out of it, and the run applies its seed to that
-same database. D1's own limits were never close: ~300 rows written a month
-against 100,000 a day, and 200 KB of a 5 GB allowance.
+no such cap. **D1 is gone too**, as of 2026-09-01, after its free-tier daily row
+read limit was exceeded and every data endpoint started failing while
+`/api/health` still reported `ok: true`. The refresh now builds a SQLite file on
+the runner, runs the same migrations and the same SQL against it, and commits
+the answers as static JSON — so there is no database in the request path and no
+read limit to exceed.
 
 Actions is also the better host for the scrape. The Worker had a subrequest
 budget, which is why it only repaired tier-1 names; a runner has none, so the

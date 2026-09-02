@@ -1,4 +1,4 @@
-"""Render a backfill Report as D1 seed SQL.
+"""Render a backfill Report as seed SQL for the store.
 
 Applied with:
 
@@ -12,10 +12,12 @@ Three properties the generated file must have, in order of importance:
    DELETE + re-INSERT; `fetch_log` and `quality_findings` from a scoped DELETE
    ahead of their inserts, since they are append-only tables with no natural key.
 
-2. **No explicit transaction.** D1 rejects `BEGIN`/`COMMIT` - it wraps a
-   `--file` batch in its own transaction, so the statements here are already
-   atomic as a group. Emitting BEGIN would fail the whole apply. The local
-   harness gets the same atomicity from `with conn:`.
+2. **No explicit transaction.** Cloudflare D1, which this seeded until
+   2026-09-01, rejected `BEGIN`/`COMMIT` outright - it wrapped a `--file` batch
+   in its own transaction, so emitting BEGIN failed the whole apply. That engine
+   is gone, but the property is kept: `sqlite3 <file> < seed.sql` and
+   `with conn:` both give the statements atomicity as a group without it, and a
+   seed that carries no transaction of its own can be applied by either.
 
 3. **Auditable.** The header records what produced the file and what it contains,
    so a diff between two seeds is readable and a stale file is obvious.
@@ -122,7 +124,7 @@ def build(
     w = out.append
 
     # ------------------------------------------------------------ provenance --
-    w("-- Taiwan semiconductor revenue tracker - D1 seed")
+    w("-- Taiwan semiconductor revenue tracker - store seed")
     w(f"-- generated_at_utc : {utc_now_iso()}")
     w(f"-- run_id           : {run_id}")
     w(f"-- source_id        : {source_id}")
@@ -135,20 +137,21 @@ def build(
     w(f"-- counts           : {report.summary()}")
     w("--")
     w("-- Idempotent: re-applying converges to identical state.")
-    w("-- No BEGIN/COMMIT - D1 wraps a --file batch in its own transaction.")
+    w("-- No BEGIN/COMMIT - the applying engine supplies the transaction.")
     w("")
 
     # -------------------------------------------------------------- universe --
     # Rewritten wholesale so config/universe.yaml is always authoritative and
-    # an edit there cannot leave a stale bucket or tier behind in D1.
+    # an edit there cannot leave a stale bucket or tier behind in the store.
     w("-- ============================================================ universe ==")
     w("DELETE FROM universe;")
     out.extend(insert_values_sql("universe", UNIVERSE_COLUMNS, _universe_rows(universe)))
     w("")
 
     # ----------------------------------------------------------- source_feed --
-    # The refresh feed list and precedence, so the Worker cron reads them from D1
-    # rather than carrying a second copy of config/sources.yaml in TypeScript.
+    # The refresh feed list and precedence, carried in the store rather than as
+    # a second copy of config/sources.yaml. It was the Worker cron that read them
+    # from there; that cron is gone, but the ingest refresh reads the same rows.
     if sources is not None:
         w("-- ========================================================= source_feed ==")
         w("DELETE FROM source_feed;")
@@ -230,7 +233,8 @@ def build(
 
     # ----------------------------------------------------------- read-backs --
     # Commented so the file stays pure DDL/DML, but ready to paste. These are the
-    # golden numbers - if they do not reproduce in D1, the seed did not land.
+    # golden numbers - if they do not reproduce in the store, the seed did not
+    # land.
     w("-- Verify after applying:")
     w("--   SELECT count(*) FROM raw_revenue;")
     w("--   SELECT * FROM analytics_monthly WHERE ticker='2330' ORDER BY month;")
