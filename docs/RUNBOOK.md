@@ -8,20 +8,64 @@ Live: <https://taiwan-semicon-revenue.tech-441.workers.dev>
 
 ---
 
-## The monthly refresh runs on GitHub Actions; D1 is unchanged
+## There is no database. SQLite builds the data; the dashboard reads files
 
-`.github/workflows/refresh.yml`, on the 11th, 14th and 18th at 01:00 UTC, plus
-`workflow_dispatch` for a manual run. It scrapes MOPS for every company, reads
-the three OpenAPI feeds as a second opinion, validates, and applies a seed to
-the **same D1 database the dashboard has always queried**.
+**Cloudflare D1 was removed on 2026-09-01.** The trigger was an outage: D1's
+free-tier daily row-read limit was exceeded, every data endpoint began returning
+
+```
+D1_ERROR: Your account has exceeded D1's free tier daily row read limit.
+```
+
+and `/api/health` went on answering `ok:true` while the page showed nothing.
+The runbook had estimated ~2,600 page loads before that cap. Whatever the true
+number, it was reachable, and nothing external could see the dashboard was down.
+
+**Nothing was ported.** D1 *is* Cloudflare's hosted SQLite. The migrations, the
+analytics views and the bucket-heatmap statement all run unchanged against a
+plain SQLite file - which `ingest/tests/test_heatmap_sql.py` had been doing in
+CI since the day it was written. Leaving D1 was rehosting, not rewriting.
+
+```
+GitHub Actions (11th, 14th, 18th)
+  └─ rebuild data/pipeline.sqlite from data/raw/*.jsonl   <- the durable state
+  └─ scrape MOPS + the three feeds, upsert the month
+  └─ assert_view_contract + golden_checks over the WHOLE store
+  └─ run the heatmap SQL at publish time -> web/public/data/*.json
+  └─ commit data/raw + web/public/data       <- a refresh is a reviewable diff
+  └─ dispatch deploy.yml                     <- which holds the CF token
+
+Browser -> /data/*.json, filtered client-side. No database in the request path.
+```
+
+Three things follow, and each is deliberate:
+
+**The durable state is JSONL, not the .sqlite file.** A SQLite file is binary,
+churns wholly on every write, and is unreadable in a diff. `data/raw/*.jsonl` is
+the store of record and the database is rebuilt from it each run. It carries
+`raw_revenue_history` (the restatements) and the original `first_seen_utc`
+values - neither can be re-scraped, because MOPS serves today's version of a
+filing, not the version it served in March.
+
+**The refresh holds no Cloudflare credential.** Static assets only ship inside a
+`wrangler deploy`, and giving an unattended scheduled scrape that token would
+hand it the power to replace the whole Worker, access gate included - strictly
+more than the D1-edit token it replaces. So refresh commits, then dispatches
+deploy.yml, which holds the token and verifies the served bundle itself.
+
+**Run `refresh` before `deploy`, always.** deploy.yml refuses to ship if
+`worker/public/data/*.json` is missing, because a shell with no data shows an
+error on every card.
 
 ```bash
 gh workflow run refresh -f month=2026-08          # manual
-gh workflow run refresh -f dry_run=true           # scrape + validate, write nothing
+gh workflow run refresh -f dry_run=true           # scrape + validate, publish nothing
 
-# locally, end to end, writing nothing:
+# locally, end to end:
 PYTHONPATH=ingest/src python -m twrev.cli refresh \
-  --db /tmp/validate.sqlite --seed-out /tmp/seed.sql --month 2026-07
+  --db data/pipeline.sqlite --state data/raw --month 2026-07
+PYTHONPATH=ingest/src python -m twrev.cli export \
+  --db data/pipeline.sqlite --out web/public/data
 ```
 
 ### What moved, and what did not

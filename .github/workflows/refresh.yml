@@ -37,21 +37,29 @@ on:
         required: false
         type: string
       dry_run:
-        description: "Scrape and validate, but do not write to D1"
+        description: "Scrape and validate, but publish nothing"
         required: false
         type: boolean
         default: false
 
-# Two runs applying seeds to the same database concurrently is the one way this
+# Two runs committing state to the same branch concurrently is the one way this
 # can corrupt anything, so they queue instead.
 concurrency:
   group: refresh
   cancel-in-progress: false
 
-# Read-only. Nothing is pushed back to the repository any more - the data lives
-# in D1, and the only write this job makes is through the Cloudflare API.
+# The data lives in this repository now, so the job writes to it: the durable
+# JSONL state and the published JSON the dashboard reads.
+#
+# NOTE WHAT IS *NOT* HERE: any Cloudflare credential. Publishing the files to
+# readers means a `wrangler deploy`, and doing that from this job would mean
+# handing an unattended scheduled scrape the power to replace the entire Worker,
+# including the access gate - a strictly larger permission than the D1-edit
+# token it replaces. So this job commits, and then asks deploy.yml to publish.
+# deploy.yml holds the Cloudflare token; refresh.yml never sees it.
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 jobs:
   refresh:
@@ -77,18 +85,6 @@ jobs:
       # come from the account that owns the Worker (a441977d...), not from any
       # other account the operator happens to be logged into - we have already
       # been bitten once by a token pointing somewhere else.
-      - name: Check the Cloudflare token is present
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it under" \
-                 "Settings > Secrets and variables > Actions, from the account" \
-                 "that owns the Worker. It needs D1 edit permission."
-            exit 1
-          fi
-
       # The scrape cache is the audit artifact - the bytes MOPS actually served.
       # Restoring it makes a same-month re-run free and instant, which matters
       # because the most common reason to re-run is a transient failure on two
@@ -107,62 +103,95 @@ jobs:
       # of a workflow's triggers is a startup failure, which reports no job and
       # no log and is near-undebuggable. Run 1 died exactly that way.
       #
-      # The SQLite file here is scratch, not state: it exists so the analytics
-      # view can be executed and the column contract asserted before anything is
-      # written to D1. The seed it emits is built from the same report those
-      # gates just passed, so what gets applied is what was validated.
-      - name: Scrape and validate
+      # The SQLite file is the STORE OF RECORD now, not a scratch validator.
+      # It is rebuilt from data/raw/*.jsonl at the start of the run - which is
+      # what carries every prior month, and without which the store would hold
+      # one month and every year-on-year figure in the export would be null -
+      # then this month's rows go in, the analytics view is executed and its
+      # twelve-column contract asserted, and the golden checks run over the
+      # WHOLE store, not just the new rows.
+      #
+      # The state is written back only AFTER those gates pass, so a bad run
+      # cannot overwrite good state.
+      - name: Scrape, validate and update the store
         env:
           PYTHONPATH: ingest/src
           MONTH: ${{ github.event.inputs.month }}
         run: |
-          args=(--db "$RUNNER_TEMP/validate.sqlite" --seed-out "$RUNNER_TEMP/seed.sql")
+          args=(--db data/pipeline.sqlite --state data/raw)
           [ -n "$MONTH" ] && args+=(--month "$MONTH")
           echo "running: twrev.cli refresh ${args[*]}"
           python -m twrev.cli refresh "${args[@]}"
 
-      - uses: actions/setup-node@v4
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        with:
-          node-version: "20"
-
-      # `--remote` is the production database. The account id is pinned in
-      # wrangler.toml, so a token for the wrong account fails here rather than
-      # quietly creating a second Worker somewhere else.
-      #
-      # Every raw_revenue write is an upsert gated on row_hash and the other
-      # DELETEs are scoped to the month being refreshed, so re-applying the same
-      # seed converges rather than duplicating, and a single-month seed cannot
-      # touch the months either side of it.
-      - name: Apply to D1
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+      # Everything the dashboard reads, written as files. The bucket heatmap is
+      # computed HERE, by the same statement that used to run on D1, out of
+      # ingest/src/twrev/sql/heatmap_bucket.sql - so the aggregation still
+      # happens in SQLite, just at publish time instead of per request.
+      - name: Publish the dashboard's data
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PYTHONPATH: ingest/src
         run: |
-          npx --yes wrangler@4 d1 execute taiwan-semicon-revenue \
-            --remote --file="$RUNNER_TEMP/seed.sql" -c worker/wrangler.toml
+          python -m twrev.cli export --db data/pipeline.sqlite --out web/public/data
+          echo "--- published ---"
+          ls -la web/public/data web/public/data/company | head -20
 
-      # Reading back through the API rather than the database on purpose: it is
-      # the dashboard's own path, so this proves what a reader will actually
-      # see, not merely that rows landed in a table.
-      - name: Verify the dashboard sees it
+      # Offline gates, before anything is committed. `validate` re-reads every
+      # hand-edited YAML and asserts the generated TypeScript is current; the
+      # test suite covers the exporters that just produced these files.
+      - name: Check the published data against the suite
+        env:
+          PYTHONPATH: ingest/src
+        run: |
+          python -m twrev.cli validate
+          python -m pytest ingest/tests -q
+
+      # A month's refresh is a reviewable diff now, not an opaque write to a
+      # service nobody can see into. If nothing changed - the ordinary case for
+      # the 14th and 18th passes when no straggler filed - there is nothing to
+      # commit and nothing to deploy.
+      - name: Commit the state and the published data
         if: ${{ github.event.inputs.dry_run != 'true' }}
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/raw web/public/data
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no change - nothing to publish"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --cached --stat
+          git commit -m "data: refresh ${MONTH:-latest} (run ${{ github.run_id }})"
+          git push
         env:
           MONTH: ${{ github.event.inputs.month }}
-        run: |
-          args=()
-          [ -n "$MONTH" ] && args+=(--month "$MONTH")
-          python3 ingest/tools/verify_live.py "${args[@]}"
 
-      # When a run fails, the seed it built and the store it validated against
-      # are the only evidence of why.
-      - name: Upload the seed and validation store
+      # Publishing is a separate job with a separate credential. Static assets
+      # only ship inside a `wrangler deploy`, so the data cannot reach a reader
+      # without one - but the scrape does not need to hold the token that does
+      # it. deploy.yml builds, deploys, and then asserts the served bundle is
+      # the one it just built.
+      - name: Ask deploy.yml to publish
+        if: ${{ github.event.inputs.dry_run != 'true' && steps.commit.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy.yml --ref "${{ github.ref_name }}"
+          echo "deploy dispatched; it will verify the served bundle itself"
+
+      # When a run fails, the store it built is the only evidence of why. The
+      # JSONL state is in git on success and deliberately NOT committed on
+      # failure, so this is the only way to see what a failed run produced.
+      - name: Upload the store and the published files
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: refresh-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/seed.sql
-            ${{ runner.temp }}/validate.sqlite
+            data/pipeline.sqlite
+            data/raw
+            web/public/data
           retention-days: 30
           if-no-files-found: warn

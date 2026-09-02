@@ -30,6 +30,11 @@
 name: deploy
 
 on:
+  # Dispatched by refresh.yml after a successful publish, and available by hand.
+  # Publishing stays a separate job with a separate credential: static assets
+  # only ship inside a `wrangler deploy`, and handing that token to an
+  # unattended scheduled scrape would give it the power to replace the whole
+  # Worker, access gate included.
   workflow_dispatch:
 
 permissions:
@@ -75,11 +80,27 @@ jobs:
       # The build writes into worker/public. If it is empty we would deploy a
       # Worker with no assets and serve a blank page, so check before shipping
       # rather than after.
-      - name: Check the bundle exists
+      - name: Check the bundle and the data exist
         run: |
           ls -la worker/public worker/public/assets
           test -f worker/public/index.html
           ls worker/public/assets/*.js >/dev/null
+
+          # The data is the site now. Deploying without it serves a shell that
+          # fetches /data/meta.json, gets the SPA fallback or a 404, and shows
+          # an error on every card - so refuse here rather than ship it. This
+          # is also the ordering constraint between the two workflows: a
+          # refresh run publishes web/public/data and commits it, and vite
+          # copies it into worker/public during the build above.
+          for f in meta.json analytics.json heatmap.json quality.json export.csv; do
+            test -s "worker/public/data/$f" || {
+              echo "::error::worker/public/data/$f is missing or empty."
+              echo "::error::Run the `refresh` workflow first - it publishes the data and commits it."
+              exit 1
+            }
+          done
+          echo "data present:"
+          ls -la worker/public/data
 
       - name: Deploy
         env:

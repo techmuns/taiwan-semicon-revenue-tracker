@@ -40,7 +40,23 @@ Thumbs.db
 # ANCHORED. Unanchored `data/` matches a directory of that name at ANY depth,
 # which silently swallowed web/public/data - the exported JSON the dashboard
 # reads and the refresh commits. The leading slash is load-bearing.
-/data/
+# CONTENTS, not the directory. `/data/` excludes the directory itself, and git
+# will not descend into an excluded directory - so a later `!` cannot re-include
+# anything under it. That is why this is `/data/*` with a hole punched in it.
+/data/*
+!/data/raw/
+/data/raw/*
+!/data/raw/*.jsonl
+
+# data/raw/*.jsonl IS THE STORE OF RECORD. It stopped being a local artefact
+# when the dashboard left D1: the SQLite file is rebuilt from it on every run,
+# and every monthly refresh arrives as a diff in it. Losing it loses
+# raw_revenue_history and the original first_seen_utc timestamps, and neither
+# can be re-scraped - MOPS serves today's version of a filing, not the version
+# it served in March.
+#
+# data/pipeline.sqlite stays ignored: binary, rebuilt from the JSONL, and it
+# would churn the whole file on every write.
 
 # Scratch CSV dumps from verifying the export against the API.
 /exp.csv

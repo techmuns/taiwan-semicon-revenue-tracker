@@ -262,6 +262,88 @@ def cmd_seed(args: argparse.Namespace) -> int:
     return 0
 
 
+
+# ------------------------------------------------------- the durable state --
+#
+# The store of record is a SQLite file, and a SQLite file is a poor thing to
+# keep in git: it is binary, it churns on every write, and a reviewer cannot see
+# what a refresh changed. So the DURABLE form is JSONL - one row per line, keys
+# sorted - and the database is rebuilt from it at the start of every run.
+#
+# Two tables matter and both are kept. raw_revenue is the filings. And
+# raw_revenue_history is the RESTATEMENTS: the record of which filings a company
+# later revised, written by a BEFORE UPDATE trigger in the migrations. That
+# table, and the original first_seen_utc timestamps beside it, are the one part
+# of this dataset that cannot be re-scraped - MOPS serves today's version of a
+# filing, not the version it served in March. Losing them would quietly destroy
+# the only evidence that a number ever changed.
+
+STATE_TABLES = ("raw_revenue", "raw_revenue_history")
+
+
+def _state_path(state_dir: str | Path, table: str) -> Path:
+    return Path(state_dir).resolve() / f"{table}.jsonl"
+
+
+def _load_state(conn, state_dir: str | None) -> int:
+    """Restore prior rows into a freshly built store. Returns rows restored."""
+    if not state_dir:
+        return 0
+    from . import store
+
+    total = 0
+    for table in STATE_TABLES:
+        path = _state_path(state_dir, table)
+        if not path.exists():
+            continue
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if not rows:
+            continue
+        if table == "raw_revenue":
+            # Through the same upsert the scrape uses, so the row_hash gate and
+            # the restatement trigger behave identically for restored rows.
+            total += store.upsert_rows(conn, rows)
+        else:
+            cols = list(rows[0].keys())
+            conn.executemany(
+                f"INSERT OR IGNORE INTO {table} ({', '.join(cols)}) "
+                f"VALUES ({', '.join('?' for _ in cols)})",
+                [[r[c] for c in cols] for r in rows],
+            )
+            total += len(rows)
+    conn.commit()
+    return total
+
+
+def _dump_state(db_path: Path, state_dir: str) -> int:
+    """Write the store's durable tables back out as JSONL."""
+    import sqlite3
+
+    from . import store
+
+    out = Path(state_dir).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    conn = store.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    total = 0
+    try:
+        for table in STATE_TABLES:
+            rows = [dict(r) for r in conn.execute(
+                f"SELECT * FROM {table} ORDER BY ticker, month_idx, source_id"
+                if table == "raw_revenue" else f"SELECT * FROM {table}"
+            )]
+            # Sorted keys and a trailing newline: a refresh should diff as the
+            # lines that actually changed, not as a whole-file rewrite.
+            text = "".join(
+                json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows
+            )
+            _state_path(out, table).write_text(text, encoding="utf-8")
+            total += len(rows)
+    finally:
+        conn.close()
+    return total
+
+
 def cmd_refresh(args: argparse.Namespace) -> int:
     """Scrape the latest published month straight into the SQLite store.
 
@@ -384,6 +466,15 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     conn = store.connect(db_path)
     try:
         store.load_universe(conn, universe)          # YAML stays authoritative
+        # Prior months, restored from the durable state before this month's rows
+        # go in. The store is rebuilt from the migrations on every run, so
+        # without this each refresh would hold ONE month and every year-on-year
+        # figure in the export would be null. The state is JSONL and committed:
+        # a month's refresh is then a reviewable diff rather than an opaque
+        # write to a service nobody can see into.
+        restored = _load_state(conn, args.state)
+        if restored:
+            print(f"  state  : restored {restored} row(s) from {args.state}")
         written = store.upsert_rows(conn, report.rows)
         store.insert_findings(conn, report.findings)
         store.insert_fetch_log(conn, report.fetch_log)
@@ -427,25 +518,18 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     # exist to collect the stragglers. Failing the job on one flaky company
     # would cry wolf twice a month. Past MAX_SOFT_FAILURES it is no longer
     # flakiness, and a human should look.
-    # ------------------------------------------------------- the D1 seed --
+    # --------------------------------------------------- the durable state --
     #
-    # D1 remains the store of record and the dashboard keeps querying it; what
-    # moved to GitHub Actions is the SCHEDULE, because the Cloudflare account is
-    # at its ceiling of five cron triggers and the Worker's handler was never
-    # registered. Nothing about D1's own limits was ever the problem: this
-    # writes about 100 rows a run against an allowance of 100,000 a day.
+    # Where the D1 seed used to be. There is no database to apply anything to
+    # any more: the store of record is data/pipeline.sqlite, and this writes it
+    # back out as JSONL so it survives between runs and so a month's refresh
+    # arrives as a diff somebody can read.
     #
-    # The seed is built from the same `report` the gates above just passed, so
-    # what is applied is exactly what was validated - not a second parse that
-    # could differ.
-    if args.seed_out:
-        out = Path(args.seed_out).resolve()
-        out.parent.mkdir(parents=True, exist_ok=True)
-        sql = seed.build(universe=universe, report=report, sources=sources)
-        out.write_text(sql, encoding="utf-8")
-        print(f"  seed   : {out} ({len(sql):,} bytes, {len(report.rows)} rows)")
-        print(f"  apply  : npx wrangler d1 execute taiwan-semicon-revenue "
-              f"--remote --file={out}")
+    # Dumped AFTER the gates above, never before, so a run that fails its golden
+    # checks cannot overwrite good state with bad.
+    if args.state:
+        n = _dump_state(db_path, args.state)
+        print(f"  state  : wrote {n} row(s) to {args.state}")
 
     hard = [f for f in report.findings if f["severity"] == "error"
             and f["code"] != "FETCH_FAILED"]
@@ -736,8 +820,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--force-refetch", action="store_true")
     sp.add_argument("--force", action="store_true",
                     help="persist even if the golden checks fail")
-    sp.add_argument("--seed-out", default=None, metavar="PATH",
-                    help="also emit D1 seed SQL for the scraped month")
+    sp.add_argument("--state", default=None, metavar="DIR",
+                    help="durable JSONL state: restored before the scrape, "
+                         "rewritten after the gates pass (default data/raw)")
     sp.set_defaults(func=cmd_refresh)
 
     sp = sub.add_parser("export", help="write the dashboard's data as static files")
