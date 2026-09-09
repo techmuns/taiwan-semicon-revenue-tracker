@@ -633,8 +633,6 @@ function InsightsTab({
     () => api.bucketHeatmap(filters, metric, agg),
     [JSON.stringify(filters), metric, agg],
   );
-  const spec = metricSpec(metric);
-
   return (
     <>
       <div
@@ -647,12 +645,15 @@ function InsightsTab({
           marginBottom: "var(--grid-gap)",
         }}
       >
-        <div style={{ fontSize: 11, color: "var(--text-hint)", lineHeight: 1.45, maxWidth: 620 }}>
-          Ranked on <strong>{spec.label}</strong>, {aggLabel(heat.data ?? undefined, agg)}.
-          Changing the metric changes what “stands out” means, which is the point: a stage can
-          lead on growth and trail on acceleration in the same month.
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/*
+          The prose that used to sit here explained the toggles beside it, in a
+          paragraph, above a headline that now says what the month actually did.
+          Two explanations of the same control is one too many; the basis line
+          moved into the headline block, where the finding is, and this row is
+          just the control it always was.
+        */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+          <span style={{ fontSize: 11, color: "var(--text-hint)", marginRight: 2 }}>Rank by</span>
           <Segmented
             options={METRIC_OPTIONS}
             value={metric}
@@ -692,7 +693,13 @@ function InsightsTab({
               rows={rows}
               bucketCells={d.cells}
               latestMonth={latestMonth}
-              metric={metric}
+              /* The metric and weighting the CELLS carry, not the toggle state:
+                 between a toggle click and the response landing they disagree,
+                 and a caption written from the toggle would describe a number
+                 that is not on screen. Cumulative YoY has no equal-weighted
+                 form, so `agg` can differ from `agg_requested` for good. */
+              metric={d.metric}
+              agg={d.agg}
               onSelect={onSelect}
             />
             {meta && <MethodAndUnits meta={meta} />}

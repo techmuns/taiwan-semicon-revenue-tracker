@@ -15,6 +15,7 @@
  *    TSMC.
  */
 
+import { NA } from "./format";
 import { CONSOLIDATION } from "./generated/relationships";
 import type { AnalyticsRow } from "./types";
 
@@ -340,8 +341,48 @@ export function standouts<T>(
  *
  * Deliberately not "significant" at any level - see the card's own footnote.
  */
-export function scoreLabel(score: number | null): { text: string; words: string } {
-  if (score === null) return { text: "no score", words: "no spread to measure against" };
+export interface ScoreLabel {
+  /** The score in MAD units, e.g. "+5.1 MAD". The precise form, for the method note. */
+  text: string;
+  /** The band, in the module's own vocabulary. Kept for the method note. */
+  words: string;
+  /**
+   * THE SAME BAND, IN THE WORDS THE PAGE ACTUALLY PRINTS.
+   *
+   * "MAD" is a correct name for the unit and a useless one for a reader: it
+   * names the estimator rather than the fact. The fact is a comparison - this
+   * stage sits N times further from the middle than a stage typically does -
+   * and that is what `gap` and `plain` say. They band off the SAME rounded
+   * number as `text` and `words`, so the precise form and the plain form can
+   * never disagree; that equivalence is the whole reason they live here rather
+   * than in the component.
+   */
+  gap: string;
+  plain: string;
+  /**
+   * The same multiple as a NUMBER, rounded exactly as `gap` prints it.
+   *
+   * Callers compose sentences around it ("a gap 5.1x wider than usual"), and
+   * they must not do that by cutting up `gap` - a caption assembled with string
+   * surgery on another caption breaks silently the first time either is
+   * reworded. Null when there is no score.
+   */
+  times: number | null;
+  /** True once the stage is far enough out to be worth naming. */
+  apart: boolean;
+}
+
+export function scoreLabel(score: number | null): ScoreLabel {
+  if (score === null) {
+    return {
+      text: "no score",
+      words: "no spread to measure against",
+      gap: NA,
+      plain: "no spread to measure against",
+      times: null,
+      apart: false,
+    };
+  }
   const shown = Number(score.toFixed(1));
   const a = Math.abs(shown);
   const words =
@@ -349,5 +390,17 @@ export function scoreLabel(score: number | null): { text: string; words: string 
     : a >= 3.0 ? "clearly apart from the other stages"
     : a >= 1.5 ? "somewhat apart"
     : "in line with the other stages";
-  return { text: `${shown > 0 ? "+" : ""}${shown.toFixed(1)} MAD`, words };
+  const plain =
+    a >= 4.5 ? "way out on its own"
+    : a >= 3.0 ? "clearly outside the pack"
+    : a >= 1.5 ? "a little outside the pack"
+    : "with the pack";
+  return {
+    text: `${shown > 0 ? "+" : ""}${shown.toFixed(1)} MAD`,
+    words,
+    gap: `${a.toFixed(1)}\u00d7 the typical gap`,
+    plain,
+    times: a,
+    apart: a >= 1.5,
+  };
 }
