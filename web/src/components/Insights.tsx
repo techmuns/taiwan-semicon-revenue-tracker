@@ -960,6 +960,24 @@ function SegmentPilot({
  * beside the one pair where it happens to hold. Someone who sees only "Wistron
  * consolidates Wiwynn" and knows TSMC owns a third of GUC will reasonably
  * conclude the dashboard has missed one.
+ *
+ * WHY THIS IS NOT A TABLE.
+ *
+ * It was, twice, and both times it failed the same way. Five full-width rows,
+ * each holding one short sentence and one citation, put a statement on the left
+ * edge of a 1350px card and its source on the right edge with nothing between
+ * them - so the eye had to travel the width of the screen to join two halves of
+ * one fact, and two of the five citations wrapped, making the row heights ragged
+ * on top of it. A table earns its shape when rows are compared COLUMN BY COLUMN.
+ * Nobody compares these: each is a self-contained verdict about one pair, read
+ * once. That is a card.
+ *
+ * So the five are cards in a grid - all five side by side on a wide screen,
+ * folding to fewer as it narrows - and the consolidation pair above them is
+ * drawn rather than asserted: a bar the width of the parent's filing with the
+ * child's revenue nested inside it, at its true share. "Already inside" is a
+ * containment relationship, and a picture of containment says it faster than a
+ * sentence can.
  */
 function Overlaps({ rows, latestMonth }: { rows: AnalyticsRow[]; latestMonth: string | null }) {
   const monthRows = forMonth(rows, latestMonth);
@@ -981,34 +999,107 @@ function Overlaps({ rows, latestMonth }: { rows: AnalyticsRow[]; latestMonth: st
         />
       ) : (
         <>
-          <div style={{ padding: "13px 14px 12px" }}>
-            {CONSOLIDATION.map((c) => {
-              const rev = revenueOf(c.child);
-              return (
+          {CONSOLIDATION.map((c) => {
+            const childRev = revenueOf(c.child);
+            const parentRev = revenueOf(c.parent);
+            // The child's share of what the parent REPORTS - which is the whole
+            // point, since the parent's figure is the one that already contains
+            // it. Null on either side means no bar: an invented width here would
+            // be a picture of a number nobody filed.
+            const share =
+              childRev !== null && parentRev !== null && parentRev > 0
+                ? (childRev / parentRev) * 100
+                : null;
+            return (
+              <div key={`${c.parent}-${c.child}`} style={{ padding: "13px 14px 14px" }}>
+                <div className="eyebrow">The one real overlap</div>
+                {share !== null && (
+                  <div style={{ marginTop: 9, marginBottom: 11, maxWidth: 820 }}>
+                    {/* The parent's filing, drawn as a bar, with the child nested
+                        inside it at its true share. */}
+                    <div
+                      style={{
+                        position: "relative",
+                        height: 42,
+                        borderRadius: 7,
+                        background: "var(--track)",
+                        border: "1px solid var(--border-solid)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          width: `${share}%`,
+                          background: "var(--primary-light)",
+                          borderRight: "1px solid var(--primary)",
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "relative",
+                          height: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "0 12px",
+                          gap: 12,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            color: "var(--primary-text)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {c.childName} {revenue(childRev)}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            color: "var(--text-secondary)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {c.parentName} reports {revenue(parentRev)}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 5, fontSize: 10.5, color: "var(--text-hint)" }}>
+                      {c.childName} is {share.toFixed(0)}% of what {c.parentName} reports
+                      {latestMonth ? ` · ${monthLabel(latestMonth)}` : ""}
+                    </div>
+                  </div>
+                )}
                 <p
-                  key={`${c.parent}-${c.child}`}
                   style={{
                     margin: 0,
                     fontSize: 14,
                     lineHeight: 1.5,
                     color: "var(--text-secondary)",
                     textWrap: "pretty",
+                    maxWidth: 900,
                   }}
                 >
                   <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                    {c.parentName}’s filing already contains {c.childName}
-                    {rev !== null ? `’s ${revenue(rev)}` : ""}.
+                    Add the two filings together and {c.childName} is counted twice.
                   </strong>{" "}
-                  Every total on this dashboard counts it once — but {c.childName} keeps its own
-                  row, and its own growth figures are untouched.
+                  So every total on this dashboard counts it once — but {c.childName} keeps its
+                  own row, and its own growth figures are untouched.
                 </p>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
 
           {CLEARED.length > 0 && (
             <>
-              <div style={{ borderTop: "1px solid var(--border)", padding: "12px 14px 6px" }}>
+              <div style={{ borderTop: "1px solid var(--border)", padding: "13px 14px 4px" }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>
                   These {CLEARED.length} look like overlaps. They are not.
                 </div>
@@ -1018,77 +1109,143 @@ function Overlaps({ rows, latestMonth }: { rows: AnalyticsRow[]; latestMonth: st
                     fontSize: 11.5,
                     lineHeight: 1.5,
                     color: "var(--text-muted)",
-                    maxWidth: 760,
+                    maxWidth: 820,
                   }}
                 >
-                  Owning a big stake does not put the revenue inside the parent’s filing. Each of
-                  these was checked against the document that states the accounting treatment,
-                  and in every case both companies report their revenue separately.
+                  Owning a big stake does not put the revenue inside the parent’s filing. Each was
+                  checked against the document that states the accounting treatment, and in every
+                  case both companies report their revenue separately.
                 </p>
               </div>
-              {/*
-                Two columns, not three. A "Counted separately" cell on every row
-                repeated, five times, the verdict the heading directly above has
-                already given - and it sat in the middle of a 1fr sentence and a
-                right-aligned source, so each row read as a statement, a wide
-                void, a label, another void. The accounting treatment that makes
-                the verdict checkable moves to the row's title, and the row keeps
-                the two things that differ between rows: the holding and the
-                document it was read off.
-              */}
-              {CLEARED.map((c) => {
-                // `stake` is free text from config and can carry several figures
-                // at several dates ("28% at FY2025, 27.6% at 2026-02-28, ~19%
-                // after the May 2026 sale"). Splitting on the first comma put
-                // "28% at FY2025" inside "owns ... of", which does not read as
-                // English. The leading percentage goes in the sentence; whatever
-                // qualifies it follows, in its own words.
-                const head = c.stake.match(/^~?\s*[\d.]+\s*%/);
-                const pctText = head ? head[0].trim() : c.stake;
-                const qualifier = head
-                  ? c.stake.slice(head[0].length).replace(/^[\s,·-]+/, "")
-                  : "";
-                return (
-                  <div
-                    key={`${c.parent}-${c.child}`}
-                    title={treatmentTip(c.treatment)}
-                    style={{
-                      borderTop: "1px solid var(--border)",
-                      padding: "8px 14px",
-                      display: "grid",
-                      gridTemplateColumns: "minmax(0, 1fr) minmax(0, 300px)",
-                      gap: 16,
-                      alignItems: "baseline",
-                    }}
-                  >
-                    <div style={{ fontSize: 12.5, color: "var(--text-secondary)", minWidth: 0 }}>
-                      <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                        {c.parentName}
-                      </strong>{" "}
-                      holds {pctText} of{" "}
-                      <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                        {c.childName}
-                      </strong>
-                      {qualifier ? (
-                        <span style={{ color: "var(--text-hint)" }}> — {qualifier}</span>
-                      ) : null}
-                    </div>
-                    {/* An accounting treatment is a fact about a date, and one of
-                        these is already known to have moved on. A bare label read
-                        as present tense is what this line exists to prevent. */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(238px, 1fr))",
+                  gap: 10,
+                  padding: "10px 14px 14px",
+                }}
+              >
+                {CLEARED.map((c) => {
+                  // `stake` is free text from config and can carry several figures
+                  // at several dates ("28% at FY2025, 27.6% at 2026-02-28, ~19%
+                  // after the May 2026 sale"). The leading percentage is the card's
+                  // headline; whatever qualifies it follows, in its own words.
+                  const head = c.stake.match(/^~?\s*[\d.]+\s*%/);
+                  const pctText = head ? head[0].trim() : c.stake;
+                  const qualifier = head
+                    ? c.stake.slice(head[0].length).replace(/^[\s,·-]+/, "")
+                    : "";
+                  return (
                     <div
+                      key={`${c.parent}-${c.child}`}
                       style={{
-                        fontSize: 10.5,
-                        color: "var(--text-hint)",
-                        textAlign: "right",
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        background: "var(--card-body-bg)",
+                        padding: "10px 12px 11px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
                         minWidth: 0,
                       }}
                     >
-                      {c.asOf}
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {c.parentName} holds
+                      </div>
+                      <div
+                        className="tnum"
+                        style={{
+                          fontSize: 21,
+                          fontWeight: 650,
+                          letterSpacing: "-0.02em",
+                          lineHeight: 1.15,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {pctText}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: "var(--text-primary)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        of {c.childName}
+                      </div>
+                      {qualifier && (
+                        <div
+                          style={{
+                            marginTop: 2,
+                            fontSize: 10.5,
+                            lineHeight: 1.45,
+                            color: "var(--text-hint)",
+                          }}
+                        >
+                          {qualifier}
+                        </div>
+                      )}
+                      {/*
+                        The treatment, not a repeated verdict. Five identical
+                        "counted separately" labels would restate the heading
+                        five times; these two differ - an equity-method holder
+                        books a share of the PROFIT, a passive holder books
+                        nothing - and the difference is the reason neither one
+                        puts revenue in the parent.
+                      */}
+                      <div
+                        style={{
+                          marginTop: "auto",
+                          paddingTop: 9,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "var(--text-secondary)",
+                        }}
+                        title={treatmentTip(c.treatment)}
+                      >
+                        {c.treatment === "equity_method"
+                          ? "Stake only"
+                          : c.treatment === "fvoci"
+                            ? "Passive holding"
+                            : c.treatment}
+                        <span style={{ fontWeight: 400, color: "var(--text-hint)" }}>
+                          {" "}
+                          · no revenue moves
+                        </span>
+                      </div>
+                      {/* An accounting treatment is a fact about a date, and one
+                          of these is already known to have moved on. A bare label
+                          read as present tense is what this line exists to
+                          prevent. */}
+                      <div
+                        style={{
+                          marginTop: 6,
+                          paddingTop: 7,
+                          borderTop: "1px solid var(--border)",
+                          fontSize: 10,
+                          lineHeight: 1.4,
+                          color: "var(--text-hint)",
+                        }}
+                      >
+                        {/*
+                          Two lines of citation, reserved.
+
+                          Three of the five citations wrap and two do not, so
+                          without a floor the treatment line above sits ~8px
+                          higher on the short cards and the row of five footers
+                          steps up and down. The floor goes on the TEXT rather
+                          than on the bordered box: 2 x 10px x 1.4 line-height is
+                          exactly two lines, and stays right if the box's padding
+                          ever changes.
+                        */}
+                        <div style={{ minHeight: 28 }}>{c.asOf}</div>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </>
           )}
         </>
